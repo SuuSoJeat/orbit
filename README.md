@@ -1,10 +1,97 @@
-# Orbit CLI
+<div align="center">
 
-`orbit` is the outer command for the iCloud-first orbit model. It can create
-the orbit before any Git repository exists, and can later create an optional
-private context and attach a canonical local repository.
+# Orbit
 
-## Commands
+### An iCloud-first project context for local Git repositories.
+
+Create the human-facing project home first. Add a private local wrapper and
+attach the canonical repository only when you need them.
+
+[![CI](https://github.com/SuuSoJeat/orbit/actions/workflows/ci.yml/badge.svg)](https://github.com/SuuSoJeat/orbit/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/SuuSoJeat/orbit?label=latest)](https://github.com/SuuSoJeat/orbit/releases)
+
+</div>
+
+<br>
+
+## The idea
+
+Orbit keeps three surfaces deliberately separate:
+
+```text
+                         orbit
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+     remote/iCloud     local/repo       config/
+   documents, assets   canonical Git    machine settings
+    and references      repository        (ignored)
+          │                │                │
+       iCloud          ~/Repositories     wrapper only
+```
+
+The iCloud orbit is the human-facing home. The wrapper is an optional local
+control plane, and the source repository stays in local Git storage. Orbit
+creates links between these surfaces; it does not move or copy company source
+code into the context.
+
+## Quick start
+
+### Install
+
+With Homebrew:
+
+```sh
+brew install SuuSoJeat/tap/orbit
+```
+
+Without Homebrew:
+
+```sh
+curl -fsSL https://github.com/SuuSoJeat/orbit/releases/latest/download/orbit-install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The portable installer uses `~/.local`. The repository and its releases must
+be public for this command to work for everyone; until then, it is available
+to repository collaborators only.
+
+### Create an orbit
+
+```sh
+orbit new "Acme Product" --category companies
+```
+
+That creates the iCloud-side orbit. Add a private wrapper when you want a
+local control plane too:
+
+```sh
+orbit new "Acme Product" \
+  --category companies \
+  --with-wrapper
+```
+
+For a fully scripted company/client flow:
+
+```sh
+orbit new "Example Project Platform" \
+  --company "Example Company" \
+  --client "Example Client" \
+  --with-wrapper
+```
+
+## Choose your flow
+
+| Need | Command | Result |
+| --- | --- | --- |
+| Start with synced documents | `orbit new "Project"` | Creates an iCloud-first orbit |
+| Add a private local context | `orbit new "Project" --with-wrapper` | Adds a wrapper under `~/Repositories/<project>-orbit` |
+| Connect existing source code | `orbit attach WRAPPER REPOSITORY` | Creates the local repository view |
+| Check the storage boundaries | `orbit doctor [WRAPPER]` | Validates the wrapper and its links |
+| See or open project surfaces | `orbit open [WRAPPER] --dry-run` | Prints destinations without launching apps |
+| Reverse a recorded creation | `orbit undo` | Removes only paths recorded for a selected creation |
+
+## Command reference
 
 ```text
 orbit new [NAME] [--category companies|ventures]
@@ -16,129 +103,77 @@ orbit doctor [WRAPPER_ROOT]
 orbit open [WRAPPER_ROOT] [--dry-run|--launch]
 ```
 
-`orbit new` always creates the iCloud-side orbit folders. Add
-`--with-wrapper` when you also want a private wrapper context. The default
-wrapper location is:
+`orbit new` can be interactive or scripted. For company orbits, the
+interactive flow offers numbered pickers for the company and client, including
+`Create new` and `No client (company-level orbit)`. It also asks whether to
+create the optional private wrapper. Existing folders are reused instead of
+duplicated.
+
+When run inside a wrapper, `doctor`, `open`, and `attach` discover it by
+walking upward from the current directory. Pass the wrapper path explicitly
+when running elsewhere.
+
+## A typical lifecycle
 
 ```text
-~/Repositories/<project-slug>-orbit
+1. Create the iCloud orbit       orbit new "Acme Product"
+2. Add a private wrapper         orbit new "Acme Product" --with-wrapper
+3. Attach canonical Git          orbit attach WRAPPER REPOSITORY
+4. Validate the boundary         orbit doctor
+5. Open the project surfaces     orbit open --launch
 ```
 
-The wrapper is copied from `templates/wrapper`, and Orbit initializes its
-local-only `local/repo` and `remote/iCloud` boundary links.
+### Attach an existing repository
 
-Each wrapper keeps its machine-specific settings in the ignored
-`config/orbit.conf`. It is a plain-text key-value file containing `name`,
-`company_repo`, and `cloud_root`; Orbit derives the two boundary-link paths
-from the wrapper root.
-
-For company orbits, an interactive run presents numbered pickers for the
-company and client. Each picker includes a `Create new` option; the client
-picker also includes `No client (company-level orbit)`. Existing folders are
-reused instead of duplicated. Interactive runs then ask whether to create the
-optional private wrapper, with `Create private wrapper` and `No wrapper
-(iCloud only)` choices.
-
-The same flow can be scripted with `--company NAME` and `--client NAME`, or
-with `--no-client` for an orbit directly under the company. Omit `NAME` to
-pick the orbit name interactively as well.
-
-When run from inside a wrapper, `doctor`, `open`, and `attach` infer the
-wrapper by walking upward from the current directory. You can still provide
-the wrapper path explicitly when running elsewhere.
-
-## Example lifecycle
-
-Create an iCloud-first project:
-
-```bash
-./bin/orbit new "Acme Product" --category companies
-```
-
-Interactive company/client selection:
-
-```bash
-./bin/orbit new "Example Project Platform"
-```
-
-Scriptable equivalent:
-
-```bash
-./bin/orbit new "Example Project Platform" \
-  --company "Example Company" \
-  --client "Example Client" \
-  --with-wrapper
-```
-
-Undo a creation:
-
-```bash
-./bin/orbit undo
-```
-
-Orbit records each creation under `~/.local/state/orbit/creations/`, including
-the timestamp, orbit name, commands, and exact paths created. `orbit undo`
-lets you choose an active recorded creation and removes only those recorded
-paths. It prints every deletion during the undo operation, then removes the
-journal to avoid leaving unused state behind.
-
-Add a private wrapper later:
-
-```bash
-./bin/orbit new "Acme Product" \
-  --category companies \
-  --cloud-root "$HOME/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Career/Companies/Acme Product" \
-  --with-wrapper
-```
-
-Attach the canonical company repository:
-
-```bash
-./bin/orbit attach \
+```sh
+orbit attach \
   "$HOME/Repositories/acme-product-orbit" \
   "$HOME/Repositories/Acme/product"
 ```
 
-From inside the wrapper, the same commands can omit the wrapper path:
+From inside the wrapper, the wrapper path can be omitted:
 
-```bash
+```sh
 cd "$HOME/Repositories/acme-product-orbit"
 orbit doctor
 orbit open --dry-run
 orbit attach "$HOME/Repositories/Acme/product"
 ```
 
-The CLI does not move or copy company source code into the context. It only
-creates a local symlink view.
+### Undo a creation
 
-## Install
+Orbit records each creation under `~/.local/state/orbit/creations/`, including
+the timestamp, orbit name, commands, and exact paths created. `orbit undo`
+lets you choose an active record, prints every deletion, and removes the
+journal after the operation.
 
-The recommended one-command install uses the public Homebrew tap. Homebrew
-downloads the versioned archive and verifies its SHA-256 checksum:
+## What a wrapper owns
 
-```sh
-brew install SuuSoJeat/tap/orbit
+```text
+<project>-orbit/
+├── bin/                 local control scripts
+├── config/orbit.conf    ignored, machine-specific settings
+├── local/repo           → canonical repository under ~/Repositories
+├── remote/iCloud        → synced iCloud project
+└── README.md
 ```
 
-On machines without Homebrew, use the portable first-party installer:
+The wrapper owns its scripts and configuration templates. The canonical
+repository owns source code. iCloud owns notes, references, assets, exports,
+and other sync-worthy documents. Keep secrets, credentials, `.git`
+directories, dependencies, and build output out of the iCloud project.
 
-```sh
-curl -fsSL https://github.com/SuuSoJeat/orbit/releases/latest/download/orbit-install.sh | sh
-```
+When created with `--with-wrapper`, the wrapper is copied from
+`templates/wrapper` and initialized with its local-only `local/repo` and
+`remote/iCloud` boundary links.
 
-The portable installer uses `~/.local`; add `~/.local/bin` to your PATH once
-if needed:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-The repository and its releases must be public for this command to work for
-everyone. Until then, it is available to repository collaborators only.
+`config/orbit.conf` is a plain-text key-value file containing `name`,
+`company_repo`, and `cloud_root`. Orbit derives the two boundary-link paths
+from the wrapper root, so they do not become stale configuration values.
 
 ## Development, CI, and release
 
-```bash
+```sh
 make check       # shell syntax and executable checks
 make test        # isolated lifecycle smoke test
 make signoff     # test, then publish a gh-signoff/tests status
@@ -150,24 +185,22 @@ Orbit uses [gh-signoff](https://github.com/basecamp/gh-signoff) as its local
 CI gate. Install it once, then enable the required status check on the default
 branch as a maintainer:
 
-```bash
+```sh
 gh extension install basecamp/gh-signoff
 gh signoff install tests
 ```
 
-Before opening or updating a pull request, run `make signoff`. It runs the
-smoke test and signs the commit with the `signoff/tests` GitHub status. The
-repository also keeps a small GitHub Actions smoke-test workflow for release
-regression coverage.
+Before opening or updating a pull request, run `make signoff`. The repository
+also keeps a GitHub Actions smoke-test workflow for release regression
+coverage.
 
 Releases are created by pushing a tag that exactly matches `VERSION`, for
-example `v0.2.1`. GitHub Actions publishes versioned and stable archive names,
+example `v0.2.1`. GitHub Actions publishes versioned and stable archives,
 SHA-256 checksums, a Homebrew formula, and the installer script to the GitHub
 Release.
 
-GitHub Packages is configured through the GitHub Container Registry. Each
-release publishes `ghcr.io/suusojeat/orbit:<tag>` and `:latest`. This is useful
-for reproducible automation; the release installer is the intended local CLI
+GitHub Packages publishes `ghcr.io/suusojeat/orbit:<tag>` and `:latest` for
+reproducible automation. The release installer is the intended local CLI
 installation path. Public anonymous pulls require the package and repository
 to be public.
 
@@ -178,6 +211,6 @@ installer remains available for machines without Homebrew.
 
 If `~/.local/bin` is not already on your PATH, add it once in `~/.zprofile`:
 
-```bash
+```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
