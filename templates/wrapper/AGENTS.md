@@ -1,6 +1,7 @@
 # Orbit context conventions
 
-- Keep canonical Git repositories outside this wrapper, normally below `~/Repositories`.
+- Keep canonical Git repositories outside this wrapper, normally below the
+  consumer's configured `repository_root`.
 - Use `local/repo` only as an ignored convenience symlink to a canonical repo.
 - Use `remote/iCloud` only as an ignored convenience symlink to the iCloud project.
 - Do not add nested repository files to the wrapper repository.

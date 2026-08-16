@@ -4,10 +4,11 @@
 name = Example Orbit
 
 # Optional until a repository is attached. The canonical repository must live
-# outside this wrapper, normally somewhere below ~/Repositories.
+# outside this wrapper, normally somewhere below the consumer's configured
+# repository_root.
 company_repo =
 
-# Change the category or orbit name here if this belongs under Ventures/Software.
-cloud_root = /Users/your-name/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Career/Companies/Example Orbit
+# This is resolved when the wrapper is created and is intentionally local.
+cloud_root = /path/to/consumer/iCloud/project
 
 # Orbit derives remote/iCloud and local/repo from the wrapper root.
