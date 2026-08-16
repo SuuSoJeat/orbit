@@ -113,12 +113,11 @@ creates a local symlink view.
 
 ## Install
 
-The recommended one-command install uses Homebrew and a formula generated for
-each GitHub Release. Homebrew downloads the versioned archive and verifies its
-SHA-256 checksum:
+The recommended one-command install uses the public Homebrew tap. Homebrew
+downloads the versioned archive and verifies its SHA-256 checksum:
 
 ```sh
-brew install https://github.com/SuuSoJeat/orbit/releases/latest/download/orbit.rb
+brew install SuuSoJeat/tap/orbit
 ```
 
 On machines without Homebrew, use the portable first-party installer:
@@ -172,11 +171,10 @@ for reproducible automation; the release installer is the intended local CLI
 installation path. Public anonymous pulls require the package and repository
 to be public.
 
-For a future Homebrew tap, the ideal shorter command would be
-`brew install SuuSoJeat/tap/orbit` after publishing a public
-`SuuSoJeat/homebrew-tap` formula repository. Homebrew is the best long-term
-native distribution channel, but it cannot serve this private repository's
-release assets yet.
+The formula is maintained in the public
+[`SuuSoJeat/homebrew-tap`](https://github.com/SuuSoJeat/homebrew-tap)
+repository. Homebrew is the native distribution channel; the release
+installer remains available for machines without Homebrew.
 
 If `~/.local/bin` is not already on your PATH, add it once in `~/.zprofile`:
 
