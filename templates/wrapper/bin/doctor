@@ -1,0 +1,98 @@
+#!/bin/sh
+
+set -eu
+
+# shellcheck disable=SC1091
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/lib.sh"
+load_config
+
+FAILURES=0
+
+run_check() {
+    CHECK_LABEL="$1"
+    shift
+    if ! check_result "$@"; then
+        FAILURES=$((FAILURES + 1))
+    fi
+}
+
+wrapper_is_git_repo() {
+    [ "$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null)" = "$PROJECT_ROOT" ]
+}
+
+company_is_git_repo() {
+    [ -d "$COMPANY_REPO" ] || return 1
+    COMPANY_TOP=$(git -C "$COMPANY_REPO" rev-parse --show-toplevel 2>/dev/null) || return 1
+    COMPANY_PHYSICAL=$(physical_dir "$COMPANY_REPO") || return 1
+    [ "$COMPANY_TOP" = "$COMPANY_PHYSICAL" ]
+}
+
+repo_link_is_ignored() {
+    RELATIVE_REPO_LINK=$(relative_to_root "$REPO_LINK") || return 1
+    git -C "$PROJECT_ROOT" check-ignore -q -- "$RELATIVE_REPO_LINK"
+}
+
+cloud_is_directory() {
+    [ -d "$CLOUD_ROOT" ]
+}
+
+cloud_link_is_correct() {
+    [ -L "$CLOUD_LINK" ] || return 1
+    [ "$(physical_dir "$CLOUD_LINK")" = "$(physical_dir "$CLOUD_ROOT")" ]
+}
+
+repo_link_is_correct() {
+    [ -n "$COMPANY_REPO" ] || return 1
+    [ -L "$REPO_LINK" ] || return 1
+    [ "$(physical_dir "$REPO_LINK")" = "$(physical_dir "$COMPANY_REPO")" ]
+}
+
+company_is_outside_wrapper() {
+    COMPANY_PHYSICAL=$(physical_dir "$COMPANY_REPO") || return 1
+    WRAPPER_PHYSICAL=$(physical_dir "$PROJECT_ROOT") || return 1
+    case "$COMPANY_PHYSICAL/" in
+        "$WRAPPER_PHYSICAL"/*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+cloud_has_no_git_metadata() {
+    [ -z "$(find "$CLOUD_ROOT" -name .git -print -prune 2>/dev/null)" ]
+}
+
+cloud_has_no_dependencies() {
+    [ -z "$(find "$CLOUD_ROOT" -name node_modules -print -prune 2>/dev/null)" ]
+}
+
+company_is_not_in_cloud() {
+    COMPANY_PHYSICAL=$(physical_dir "$COMPANY_REPO") || return 1
+    CLOUD_PHYSICAL=$(physical_dir "$CLOUD_ROOT") || return 1
+    case "$COMPANY_PHYSICAL/" in
+        "$CLOUD_PHYSICAL"/*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+printf 'Studio context doctor\n\n'
+run_check "wrapper is a Git repository" wrapper_is_git_repo
+run_check "cloud project directory exists" cloud_is_directory
+run_check "cloud boundary symlink resolves correctly" cloud_link_is_correct
+run_check "cloud project contains no .git directories" cloud_has_no_git_metadata
+run_check "cloud project contains no node_modules directories" cloud_has_no_dependencies
+
+if [ -z "$COMPANY_REPO" ]; then
+    printf 'INFO company repository is not attached yet (optional)\n'
+else
+    run_check "company repository exists independently" company_is_git_repo
+    run_check "company repository is outside wrapper" company_is_outside_wrapper
+    run_check "repository boundary symlink is ignored by wrapper" repo_link_is_ignored
+    run_check "repository boundary symlink resolves correctly" repo_link_is_correct
+    run_check "company repository is outside cloud project" company_is_not_in_cloud
+fi
+
+if [ "$FAILURES" -ne 0 ]; then
+    printf '\n%d check(s) failed.\n' "$FAILURES" >&2
+    exit 1
+fi
+
+printf '\nAll checks passed.\n'

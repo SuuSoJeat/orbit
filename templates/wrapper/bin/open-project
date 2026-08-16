@@ -1,0 +1,61 @@
+#!/bin/sh
+
+set -eu
+
+# shellcheck disable=SC1091
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/lib.sh"
+load_config
+
+DRY_RUN=1
+
+usage() {
+    cat <<'EOF'
+Usage: ./bin/open-project [--dry-run|--launch]
+
+Show or open the three project surfaces:
+
+  wrapper   this private orchestration repository
+  company   the independent company repository
+  cloud     the iCloud document project
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --dry-run) DRY_RUN=1 ;;
+        --launch) DRY_RUN=0 ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; die "unknown option: $1" ;;
+    esac
+    shift
+done
+
+printf 'wrapper: %s\n' "$PROJECT_ROOT"
+if [ -n "$COMPANY_REPO" ]; then
+    printf 'company: %s\n' "$COMPANY_REPO"
+else
+    printf 'company: (not attached yet)\n'
+fi
+printf 'cloud:   %s\n' "$CLOUD_ROOT"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    printf '\nDry run only. Use --launch to open Finder, Terminal, and the configured editor.\n'
+    exit 0
+fi
+
+command -v open >/dev/null 2>&1 || die "macOS open command is unavailable"
+
+open "$CLOUD_LINK"
+open -a Terminal "$PROJECT_ROOT"
+
+if [ -z "$COMPANY_REPO" ]; then
+    printf 'Editor not opened: no company repository is attached yet.\n' >&2
+elif [ -n "${EDITOR_APP:-}" ]; then
+    open -a "$EDITOR_APP" "$COMPANY_REPO"
+elif [ -d "/Applications/Visual Studio Code.app" ]; then
+    open -a "Visual Studio Code" "$COMPANY_REPO"
+elif [ -d "/Applications/Cursor.app" ]; then
+    open -a "Cursor" "$COMPANY_REPO"
+else
+    printf 'Editor not opened: set EDITOR_APP or install Visual Studio Code/Cursor.\n' >&2
+fi

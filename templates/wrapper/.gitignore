@@ -1,0 +1,13 @@
+# The wrapper must never absorb files from a canonical repository exposed here.
+/local/*
+/remote/*
+
+# Machine-specific configuration and local boundary links.
+/config/project.env
+
+# Local operating-system and tooling noise.
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.codex/
