@@ -17,6 +17,7 @@ info() {
 usage() {
     cat <<'EOF'
 Usage:
+  orbit [--config PATH] config init|show|check
   orbit new [NAME] [options]
   orbit undo
   orbit attach [WRAPPER_ROOT] REPOSITORY_PATH
@@ -24,6 +25,7 @@ Usage:
   orbit open [WRAPPER_ROOT] [--dry-run|--launch]
 
 Commands:
+  config    create or inspect the consumer configuration
   new       create an iCloud-first project and optionally its private wrapper
   undo      remove a previously recorded orbit creation
   attach    attach a canonical local Git repository to a wrapper
@@ -38,11 +40,111 @@ Options for new:
   --cloud-root PATH
   --with-wrapper
   --wrapper-root PATH
+
+Global options:
+  --config PATH  use an alternate consumer configuration file
 EOF
 }
 
 version() {
     cat "${CLI_ROOT}/VERSION"
+}
+
+config_value() {
+    config_key=$1
+    config_file=$2
+    awk -v wanted="$config_key" '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+        {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            if (line == "" || substr(line, 1, 1) == "#") next
+            separator = index(line, "=")
+            if (separator == 0) next
+            key = trim(substr(line, 1, separator - 1))
+            if (key == wanted) {
+                print trim(substr(line, separator + 1))
+                found = 1
+                exit
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$config_file"
+}
+
+consumer_config_path() {
+    if [ -n "${CLI_CONFIG_FILE:-}" ]; then
+        printf '%s\n' "$CLI_CONFIG_FILE"
+    elif [ -n "${ORBIT_CONFIG:-}" ]; then
+        printf '%s\n' "$ORBIT_CONFIG"
+    elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        printf '%s/orbit/config\n' "$XDG_CONFIG_HOME"
+    else
+        printf '%s/.config/orbit/config\n' "$HOME"
+    fi
+}
+
+expand_config_path() {
+    config_path_value=$1
+    case "$config_path_value" in
+        "~") printf '%s\n' "$HOME" ;;
+        "~/"*) printf '%s/%s\n' "$HOME" "${config_path_value#\~/}" ;;
+        /*) printf '%s\n' "$config_path_value" ;;
+        *) die "configured path must be absolute or begin with ~: ${config_path_value}" ;;
+    esac
+}
+
+load_consumer_config() {
+    CONSUMER_CONFIG_FILE=$(consumer_config_path)
+    CONSUMER_COMPANIES_ROOT=''
+    CONSUMER_VENTURES_ROOT=''
+    CONSUMER_REPOSITORY_ROOT="${HOME}/Repositories"
+    CONSUMER_WRAPPER_ROOT=''
+
+    if [ -f "$CONSUMER_CONFIG_FILE" ]; then
+        if CONSUMER_COMPANIES_ROOT=$(config_value companies_root "$CONSUMER_CONFIG_FILE"); then
+            :
+        fi
+        if CONSUMER_VENTURES_ROOT=$(config_value ventures_root "$CONSUMER_CONFIG_FILE"); then
+            :
+        fi
+        if CONSUMER_REPOSITORY_ROOT=$(config_value repository_root "$CONSUMER_CONFIG_FILE"); then
+            :
+        fi
+        if CONSUMER_WRAPPER_ROOT=$(config_value wrapper_root "$CONSUMER_CONFIG_FILE"); then
+            :
+        fi
+    elif [ -n "${CLI_CONFIG_FILE:-}" ] || [ -n "${ORBIT_CONFIG:-}" ]; then
+        die "consumer configuration not found: ${CONSUMER_CONFIG_FILE}"
+    fi
+
+    [ -n "$CONSUMER_WRAPPER_ROOT" ] || CONSUMER_WRAPPER_ROOT=$CONSUMER_REPOSITORY_ROOT
+    if [ -n "$CONSUMER_COMPANIES_ROOT" ]; then
+        CONSUMER_COMPANIES_ROOT=$(expand_config_path "$CONSUMER_COMPANIES_ROOT")
+    fi
+    if [ -n "$CONSUMER_VENTURES_ROOT" ]; then
+        CONSUMER_VENTURES_ROOT=$(expand_config_path "$CONSUMER_VENTURES_ROOT")
+    fi
+    CONSUMER_REPOSITORY_ROOT=$(expand_config_path "$CONSUMER_REPOSITORY_ROOT")
+    CONSUMER_WRAPPER_ROOT=$(expand_config_path "$CONSUMER_WRAPPER_ROOT")
+
+    export CONSUMER_CONFIG_FILE CONSUMER_COMPANIES_ROOT CONSUMER_VENTURES_ROOT
+    export CONSUMER_REPOSITORY_ROOT CONSUMER_WRAPPER_ROOT
+}
+
+config_path_value() {
+    config_key=$1
+    config_file=$2
+    if config_value_result=$(config_value "$config_key" "$config_file"); then
+        [ -n "$config_value_result" ] || return 1
+        expand_config_path "$config_value_result"
+    else
+        return 1
+    fi
 }
 
 prompt_for_name() {
@@ -171,7 +273,7 @@ journal_init() {
     done
     CREATION_LOG=$journal_path
     {
-        printf 'format\t1\n'
+        printf 'format\t2\n'
         printf 'timestamp\t%s\n' "$creation_stamp"
         printf 'orbit\t%s\n' "$project_name"
         printf 'status\tin-progress\n'
@@ -181,6 +283,21 @@ journal_init() {
 journal_command() {
     [ -n "${CREATION_LOG:-}" ] || return 0
     printf 'command\t%s\n' "$*" >> "$CREATION_LOG"
+}
+
+journal_root() {
+    [ -n "${CREATION_LOG:-}" ] || return 0
+    printf 'root\t%s\n' "$1" >> "$CREATION_LOG"
+}
+
+journal_scope_root() {
+    scope_path=$1
+    while [ ! -d "$scope_path" ]; do
+        [ "$scope_path" = "/" ] && break
+        scope_path=${scope_path%/*}
+        [ -n "$scope_path" ] || scope_path=/
+    done
+    printf '%s\n' "$scope_path"
 }
 
 journal_path() {
@@ -230,32 +347,6 @@ wrapper_is_empty_or_missing() {
     [ ! -e "$wrapper_root" ] && return 0
     [ -d "$wrapper_root" ] || return 1
     [ -z "$(find "$wrapper_root" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]
-}
-
-config_value() {
-    config_key=$1
-    config_file=$2
-    awk -v wanted="$config_key" '
-        function trim(value) {
-            sub(/^[[:space:]]+/, "", value)
-            sub(/[[:space:]]+$/, "", value)
-            return value
-        }
-        {
-            line = $0
-            sub(/^[[:space:]]*/, "", line)
-            if (line == "" || substr(line, 1, 1) == "#") next
-            separator = index(line, "=")
-            if (separator == 0) next
-            key = trim(substr(line, 1, separator - 1))
-            if (key == wanted) {
-                print trim(substr(line, separator + 1))
-                found = 1
-                exit
-            }
-        }
-        END { if (!found) exit 1 }
-    ' "$config_file"
 }
 
 wrapper_set_config_value() {
@@ -382,6 +473,136 @@ EOF
     [ "$wrapper_preexisted" -eq 0 ] || journal_tree "$wrapper_root"
 }
 
+cmd_config_init() {
+    config_file=$(consumer_config_path)
+    companies_root=''
+    ventures_root=''
+    repository_root="${HOME}/Repositories"
+    wrapper_root=''
+    force=0
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --companies-root)
+                shift
+                [ "$#" -gt 0 ] || die "--companies-root requires a path"
+                companies_root=$1
+                ;;
+            --ventures-root)
+                shift
+                [ "$#" -gt 0 ] || die "--ventures-root requires a path"
+                ventures_root=$1
+                ;;
+            --repository-root)
+                shift
+                [ "$#" -gt 0 ] || die "--repository-root requires a path"
+                repository_root=$1
+                ;;
+            --wrapper-root)
+                shift
+                [ "$#" -gt 0 ] || die "--wrapper-root requires a path"
+                wrapper_root=$1
+                ;;
+            --force) force=1 ;;
+            -h|--help)
+                cat <<'EOF'
+Usage: orbit config init [options]
+
+Options:
+  --companies-root PATH
+  --ventures-root PATH
+  --repository-root PATH
+  --wrapper-root PATH
+  --force
+EOF
+                return 0
+                ;;
+            *) die "unknown option for config init: $1" ;;
+        esac
+        shift
+    done
+
+    [ -n "$wrapper_root" ] || wrapper_root=$repository_root
+    if [ -e "$config_file" ] && [ "$force" -ne 1 ]; then
+        die "consumer configuration already exists: ${config_file} (use --force to replace it)"
+    fi
+
+    case "$config_file" in
+        */*) config_parent=${config_file%/*} ;;
+        *) config_parent=. ;;
+    esac
+    mkdir -p "$config_parent"
+    (
+        umask 077
+        cat > "$config_file" <<EOF
+# Orbit consumer configuration. Paths may be absolute or begin with ~.
+# Leave a cloud root empty if that category is not used by this consumer.
+companies_root = ${companies_root}
+ventures_root = ${ventures_root}
+repository_root = ${repository_root}
+wrapper_root = ${wrapper_root}
+EOF
+    )
+    info "Created consumer configuration: ${config_file}"
+    if [ -z "$companies_root" ] || [ -z "$ventures_root" ]; then
+        info "Set the missing cloud roots before creating category-based projects."
+    fi
+}
+
+cmd_config_show() {
+    [ "$#" -eq 0 ] || die "usage: orbit config show"
+    config_file=$(consumer_config_path)
+    printf 'config: %s\n' "$config_file"
+    if [ ! -f "$config_file" ]; then
+        printf 'status: not found\n'
+        return 1
+    fi
+    for config_key in companies_root ventures_root repository_root wrapper_root; do
+        if config_resolved=$(config_path_value "$config_key" "$config_file"); then
+            printf '%s: %s\n' "$config_key" "$config_resolved"
+        else
+            printf '%s: (not configured)\n' "$config_key"
+        fi
+    done
+}
+
+cmd_config_check() {
+    [ "$#" -eq 0 ] || die "usage: orbit config check"
+    config_file=$(consumer_config_path)
+    [ -f "$config_file" ] || die "consumer configuration not found: ${config_file}"
+    failures=0
+    for config_key in companies_root ventures_root repository_root wrapper_root; do
+        if config_resolved=$(config_path_value "$config_key" "$config_file"); then
+            printf 'OK   %s = %s\n' "$config_key" "$config_resolved"
+        elif [ "$config_key" = companies_root ] || [ "$config_key" = ventures_root ]; then
+            printf 'INFO %s is not configured\n' "$config_key"
+        else
+            printf 'FAIL %s is required\n' "$config_key"
+            failures=$((failures + 1))
+        fi
+    done
+    [ "$failures" -eq 0 ] || die "consumer configuration is invalid"
+    printf 'Configuration checks passed.\n'
+}
+
+cmd_config() {
+    [ "$#" -gt 0 ] || {
+        printf 'Usage: orbit config init|show|check\n' >&2
+        exit 1
+    }
+    subcommand=$1
+    shift
+    case "$subcommand" in
+        init) cmd_config_init "$@" ;;
+        show) cmd_config_show "$@" ;;
+        check) cmd_config_check "$@" ;;
+        -h|--help)
+            printf 'Usage: orbit config init|show|check\n'
+            ;;
+        *) die "unknown config command: ${subcommand}" ;;
+    esac
+}
+
 cmd_new() {
     project_name=''
     interactive=0
@@ -450,10 +671,14 @@ cmd_new() {
     slug=$(slugify "$project_name")
     [ -n "$slug" ] || die "orbit name must contain letters or numbers"
 
+    load_consumer_config
+
     if [ -z "$cloud_root" ]; then
         case "$category" in
             companies)
-                cloud_base="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Career/Companies"
+                [ -n "$CONSUMER_COMPANIES_ROOT" ] \
+                    || die "companies_root is not configured; run orbit config init or use --cloud-root"
+                cloud_base=$CONSUMER_COMPANIES_ROOT
                 [ -z "$client_name" ] || [ -n "$company_name" ] || die "--client requires --company"
                 if [ -z "$company_name" ]; then
                     interactive=1
@@ -480,7 +705,9 @@ cmd_new() {
                 ;;
             ventures)
                 [ -z "$company_name" ] && [ -z "$client_name" ] || die "company/client options require --category companies"
-                cloud_base="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Ventures/Software"
+                [ -n "$CONSUMER_VENTURES_ROOT" ] \
+                    || die "ventures_root is not configured; run orbit config init or use --cloud-root"
+                cloud_base=$CONSUMER_VENTURES_ROOT
                 cloud_root="${cloud_base}/${project_name}"
                 ;;
             *) die "category must be companies or ventures" ;;
@@ -494,14 +721,16 @@ cmd_new() {
     fi
 
     journal_init
+    journal_root "$(journal_scope_root "$cloud_root")"
     journal_command "orbit new $(shell_quote "$project_name") --category $(shell_quote "$category")"
     create_cloud_project "$cloud_root"
     info "Created or confirmed iCloud project: ${cloud_root}"
 
     if [ "$with_wrapper" -eq 1 ]; then
         if [ -z "$wrapper_root" ]; then
-            wrapper_root="${HOME}/Repositories/${slug}-orbit"
+            wrapper_root="${CONSUMER_WRAPPER_ROOT}/${slug}-orbit"
         fi
+        journal_root "$(journal_scope_root "$wrapper_root")"
         create_wrapper "$wrapper_root" "$project_name" "$cloud_root"
         info "Created private wrapper: ${wrapper_root}"
     else
@@ -550,6 +779,10 @@ cmd_undo() {
     selected_paths=$(mktemp "${TMPDIR:-/tmp}/orbit-undo-paths.XXXXXX")
     awk -F '\t' '$1 == "path" { print length($2) "\t" $2 }' "$selected_log" \
         | sort -rn > "$selected_paths"
+    selected_roots=$(mktemp "${TMPDIR:-/tmp}/orbit-undo-roots.XXXXXX")
+    awk -F '\t' '$1 == "root" { print $2 }' "$selected_log" > "$selected_roots"
+    root_count=$(wc -l < "$selected_roots" | tr -d ' ')
+    [ "$root_count" -gt 0 ] || die "creation record lacks safety roots; refusing to undo it"
     path_count=$(wc -l < "$selected_paths" | tr -d ' ')
 
     printf '\nSelected: %s\n' "$selected_orbit"
@@ -574,7 +807,7 @@ cmd_undo() {
     case "$confirmation" in
         y|Y|yes|YES) ;;
         *)
-            /bin/rm "$selected_paths" "$log_list"
+            /bin/rm "$selected_paths" "$selected_roots" "$log_list"
             info "Undo cancelled."
             return 0
             ;;
@@ -584,12 +817,20 @@ cmd_undo() {
     while IFS="$(printf '\t')" read -r path_length path_to_remove; do
         [ -n "$path_to_remove" ] || continue
         case "$path_to_remove" in
-            "$HOME/Library"|"$HOME/Library/"*|"$HOME/Repositories"|"$HOME/Repositories/"*) ;;
-            *) die "refusing to remove unsafe recorded path: ${path_to_remove}" ;;
-        esac
-        case "$path_to_remove" in
             *'/../'*|*'/..'|../*) die "refusing to remove unresolved recorded path: ${path_to_remove}" ;;
         esac
+        authorized=0
+        while IFS= read -r allowed_root; do
+            [ -n "$allowed_root" ] || continue
+            case "$path_to_remove" in
+                "$allowed_root"|"$allowed_root"/*)
+                    authorized=1
+                    break
+                    ;;
+            esac
+        done < "$selected_roots"
+        [ "$authorized" -eq 1 ] \
+            || die "refusing to remove path outside the recorded creation roots: ${path_to_remove}"
         if [ -L "$path_to_remove" ]; then
             /bin/rm -f "$path_to_remove"
             info "  deleted symlink: ${path_to_remove}"
@@ -604,7 +845,7 @@ cmd_undo() {
         fi
     done < "$selected_paths"
 
-    /bin/rm "$selected_paths" "$log_list" "$selected_log"
+    /bin/rm "$selected_paths" "$selected_roots" "$log_list" "$selected_log"
     info "Removed recorded creation: ${selected_orbit}"
 }
 
@@ -691,11 +932,20 @@ cmd_open() {
     fi
 }
 
+CLI_CONFIG_FILE=''
+if [ "$#" -gt 0 ] && [ "$1" = "--config" ]; then
+    shift
+    [ "$#" -gt 0 ] || die "--config requires a path"
+    CLI_CONFIG_FILE=$1
+    shift
+fi
+
 [ "$#" -gt 0 ] || { usage >&2; exit 1; }
 
 command=$1
 shift
 case "$command" in
+    config) cmd_config "$@" ;;
     new) cmd_new "$@" ;;
     undo) cmd_undo "$@" ;;
     attach) cmd_attach "$@" ;;

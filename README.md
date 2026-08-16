@@ -70,6 +70,21 @@ orbit new "Example Project Platform" \
   --with-wrapper
 ```
 
+Configure consumer-specific locations before using category-based creation:
+
+```sh
+orbit config init \
+  --companies-root "$HOME/Library/Mobile Documents/com~apple~CloudDocs/YourName/Career/Companies" \
+  --ventures-root "$HOME/Library/Mobile Documents/com~apple~CloudDocs/YourName/Ventures/Software" \
+  --repository-root "$HOME/Repositories"
+orbit config check
+```
+
+The configuration is stored at `~/.config/orbit/config`, or at the path
+specified by `ORBIT_CONFIG` or the global `--config PATH` option. It is
+consumer-specific and should not be committed. Use `orbit config show` to
+inspect the resolved paths.
+
 Attach an existing canonical repository:
 
 ```sh
@@ -98,6 +113,7 @@ orbit attach "$HOME/Repositories/Acme/product"
 
 | Command | What it does |
 | --- | --- |
+| orbit config init/show/check | Create or inspect consumer-specific locations |
 | `orbit new [NAME]` | Create an iCloud-first project and optionally a private wrapper |
 | `orbit attach REPOSITORY_PATH` | Attach a canonical local Git repository to the current wrapper |
 | `orbit doctor` | Validate the wrapper, iCloud project, and repository boundaries |
@@ -119,18 +135,22 @@ root. Company projects can use `--company NAME` and `--client NAME`, or
 values to use the interactive pickers.
 
 `--wrapper-root PATH` also enables the private wrapper and lets you choose its
-location. Otherwise, Orbit uses:
+location. Otherwise, Orbit uses the configured `wrapper_root`, which defaults
+to `repository_root`:
 
 ```text
 ~/Repositories/<project-slug>-orbit
 ```
+
+`--cloud-root PATH` remains available for a one-off project and bypasses the
+category roots in the consumer configuration.
 
 ## Storage rules
 
 - Keep notes, references, assets, exports, and other sync-worthy documents in
   the iCloud project.
 - Keep the canonical Git repository outside iCloud, normally under
-  `~/Repositories`.
+  the configured `repository_root`.
 - Keep secrets, credentials, `.git` directories, dependencies, and build
   output out of the iCloud project.
 - Use `orbit doctor` before relying on a wrapper or attached repository.
