@@ -6,6 +6,11 @@ CLI_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 FIXTURE=$(mktemp -d "${TMPDIR:-/tmp}/orbit-test.XXXXXX")
 FIXTURE_HOME="${FIXTURE}/home"
 export HOME="$FIXTURE_HOME"
+DEFAULT_HOME="${FIXTURE}/default-home"
+DEFAULT_WORKSPACE="${DEFAULT_HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace"
+env -u ORBIT_CONFIG HOME="$DEFAULT_HOME" "$CLI_ROOT/bin/orbit" new "Default Venture" --category ventures
+[ -d "$DEFAULT_WORKSPACE/Ventures/Default Venture/Notes" ]
+
 CONFIG_FILE="${FIXTURE}/consumer.conf"
 COMPANIES_ROOT="${FIXTURE}/icloud/Alice/Career/Companies"
 VENTURES_ROOT="${FIXTURE}/icloud/Alice/Ventures/Software"
@@ -75,5 +80,13 @@ SECOND_VENTURES_ROOT="${FIXTURE}/other-icloud/Ventures/Software"
     --repository-root "${FIXTURE}/other-repositories"
 "$CLI_ROOT/bin/orbit" --config "$SECOND_CONFIG" new "Other Consumer Venture" --category ventures
 [ -d "$SECOND_VENTURES_ROOT/Other Consumer Venture/Notes" ]
+
+PROFILE_CONFIG="${FIXTURE}/profile-consumer.conf"
+PROFILE_WORKSPACE="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Alice/Workspace"
+"$CLI_ROOT/bin/orbit" --config "$PROFILE_CONFIG" config init \
+    --icloud-profile Alice \
+    --repository-root "${FIXTURE}/profile-repositories"
+"$CLI_ROOT/bin/orbit" --config "$PROFILE_CONFIG" config show \
+    | grep -F "companies_root: ${PROFILE_WORKSPACE}/Companies" >/dev/null
 
 printf 'Orbit CLI smoke test passed. Fixture: %s\n' "$FIXTURE"

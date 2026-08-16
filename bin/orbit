@@ -100,23 +100,23 @@ expand_config_path() {
 
 load_consumer_config() {
     CONSUMER_CONFIG_FILE=$(consumer_config_path)
-    CONSUMER_COMPANIES_ROOT=''
-    CONSUMER_VENTURES_ROOT=''
+    CONSUMER_COMPANIES_ROOT="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies"
+    CONSUMER_VENTURES_ROOT="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures"
     CONSUMER_REPOSITORY_ROOT="${HOME}/Repositories"
     CONSUMER_WRAPPER_ROOT=''
 
     if [ -f "$CONSUMER_CONFIG_FILE" ]; then
-        if CONSUMER_COMPANIES_ROOT=$(config_value companies_root "$CONSUMER_CONFIG_FILE"); then
-            :
+        if config_value_result=$(config_value companies_root "$CONSUMER_CONFIG_FILE"); then
+            [ -z "$config_value_result" ] || CONSUMER_COMPANIES_ROOT=$config_value_result
         fi
-        if CONSUMER_VENTURES_ROOT=$(config_value ventures_root "$CONSUMER_CONFIG_FILE"); then
-            :
+        if config_value_result=$(config_value ventures_root "$CONSUMER_CONFIG_FILE"); then
+            [ -z "$config_value_result" ] || CONSUMER_VENTURES_ROOT=$config_value_result
         fi
-        if CONSUMER_REPOSITORY_ROOT=$(config_value repository_root "$CONSUMER_CONFIG_FILE"); then
-            :
+        if config_value_result=$(config_value repository_root "$CONSUMER_CONFIG_FILE"); then
+            [ -z "$config_value_result" ] || CONSUMER_REPOSITORY_ROOT=$config_value_result
         fi
-        if CONSUMER_WRAPPER_ROOT=$(config_value wrapper_root "$CONSUMER_CONFIG_FILE"); then
-            :
+        if config_value_result=$(config_value wrapper_root "$CONSUMER_CONFIG_FILE"); then
+            [ -z "$config_value_result" ] || CONSUMER_WRAPPER_ROOT=$config_value_result
         fi
     elif [ -n "${CLI_CONFIG_FILE:-}" ] || [ -n "${ORBIT_CONFIG:-}" ]; then
         die "consumer configuration not found: ${CONSUMER_CONFIG_FILE}"
@@ -134,17 +134,6 @@ load_consumer_config() {
 
     export CONSUMER_CONFIG_FILE CONSUMER_COMPANIES_ROOT CONSUMER_VENTURES_ROOT
     export CONSUMER_REPOSITORY_ROOT CONSUMER_WRAPPER_ROOT
-}
-
-config_path_value() {
-    config_key=$1
-    config_file=$2
-    if config_value_result=$(config_value "$config_key" "$config_file"); then
-        [ -n "$config_value_result" ] || return 1
-        expand_config_path "$config_value_result"
-    else
-        return 1
-    fi
 }
 
 prompt_for_name() {
@@ -475,10 +464,11 @@ EOF
 
 cmd_config_init() {
     config_file=$(consumer_config_path)
-    companies_root=''
-    ventures_root=''
+    companies_root="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies"
+    ventures_root="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures"
     repository_root="${HOME}/Repositories"
     wrapper_root=''
+    icloud_profile=''
     force=0
 
     while [ "$#" -gt 0 ]; do
@@ -503,6 +493,11 @@ cmd_config_init() {
                 [ "$#" -gt 0 ] || die "--wrapper-root requires a path"
                 wrapper_root=$1
                 ;;
+            --icloud-profile)
+                shift
+                [ "$#" -gt 0 ] || die "--icloud-profile requires a name"
+                icloud_profile=$1
+                ;;
             --force) force=1 ;;
             -h|--help)
                 cat <<'EOF'
@@ -513,6 +508,7 @@ Options:
   --ventures-root PATH
   --repository-root PATH
   --wrapper-root PATH
+  --icloud-profile NAME
   --force
 EOF
                 return 0
@@ -522,6 +518,16 @@ EOF
         shift
     done
 
+    case "$icloud_profile" in
+        */*|.|..) die "--icloud-profile must be a single directory name: ${icloud_profile}" ;;
+    esac
+    if [ -n "$icloud_profile" ]; then
+        icloud_workspace_root="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/${icloud_profile}/Workspace"
+        [ "$companies_root" = "${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies" ] \
+            && companies_root="${icloud_workspace_root}/Companies"
+        [ "$ventures_root" = "${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures" ] \
+            && ventures_root="${icloud_workspace_root}/Ventures"
+    fi
     [ -n "$wrapper_root" ] || wrapper_root=$repository_root
     if [ -e "$config_file" ] && [ "$force" -ne 1 ]; then
         die "consumer configuration already exists: ${config_file} (use --force to replace it)"
@@ -544,44 +550,37 @@ wrapper_root = ${wrapper_root}
 EOF
     )
     info "Created consumer configuration: ${config_file}"
-    if [ -z "$companies_root" ] || [ -z "$ventures_root" ]; then
-        info "Set the missing cloud roots before creating category-based projects."
-    fi
 }
 
 cmd_config_show() {
     [ "$#" -eq 0 ] || die "usage: orbit config show"
     config_file=$(consumer_config_path)
     printf 'config: %s\n' "$config_file"
-    if [ ! -f "$config_file" ]; then
-        printf 'status: not found\n'
-        return 1
+    if [ -f "$config_file" ]; then
+        printf 'status: configured\n'
+    else
+        printf 'status: using built-in defaults\n'
     fi
-    for config_key in companies_root ventures_root repository_root wrapper_root; do
-        if config_resolved=$(config_path_value "$config_key" "$config_file"); then
-            printf '%s: %s\n' "$config_key" "$config_resolved"
-        else
-            printf '%s: (not configured)\n' "$config_key"
-        fi
-    done
+    load_consumer_config
+    printf 'companies_root: %s\n' "$CONSUMER_COMPANIES_ROOT"
+    printf 'ventures_root: %s\n' "$CONSUMER_VENTURES_ROOT"
+    printf 'repository_root: %s\n' "$CONSUMER_REPOSITORY_ROOT"
+    printf 'wrapper_root: %s\n' "$CONSUMER_WRAPPER_ROOT"
 }
 
 cmd_config_check() {
     [ "$#" -eq 0 ] || die "usage: orbit config check"
     config_file=$(consumer_config_path)
-    [ -f "$config_file" ] || die "consumer configuration not found: ${config_file}"
-    failures=0
-    for config_key in companies_root ventures_root repository_root wrapper_root; do
-        if config_resolved=$(config_path_value "$config_key" "$config_file"); then
-            printf 'OK   %s = %s\n' "$config_key" "$config_resolved"
-        elif [ "$config_key" = companies_root ] || [ "$config_key" = ventures_root ]; then
-            printf 'INFO %s is not configured\n' "$config_key"
-        else
-            printf 'FAIL %s is required\n' "$config_key"
-            failures=$((failures + 1))
-        fi
-    done
-    [ "$failures" -eq 0 ] || die "consumer configuration is invalid"
+    load_consumer_config
+    if [ -f "$config_file" ]; then
+        printf 'Source: %s\n' "$config_file"
+    else
+        printf 'Source: built-in defaults\n'
+    fi
+    printf 'OK   companies_root = %s\n' "$CONSUMER_COMPANIES_ROOT"
+    printf 'OK   ventures_root = %s\n' "$CONSUMER_VENTURES_ROOT"
+    printf 'OK   repository_root = %s\n' "$CONSUMER_REPOSITORY_ROOT"
+    printf 'OK   wrapper_root = %s\n' "$CONSUMER_WRAPPER_ROOT"
     printf 'Configuration checks passed.\n'
 }
 
