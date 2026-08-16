@@ -5,7 +5,7 @@ set -eu
 PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 export PROJECT_ROOT
 
-CONFIG_FILE="${PROJECT_ROOT}/config/project.env"
+CONFIG_FILE="${PROJECT_ROOT}/config/orbit.conf"
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -18,19 +18,46 @@ info() {
 
 load_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
-        die "missing ${CONFIG_FILE}; run ./bin/bootstrap first"
+        die "missing ${CONFIG_FILE}; create the wrapper with orbit new"
     fi
 
-    # The config is a local file created from the tracked template. It contains
-    # paths only; it is never intended to hold credentials or secrets.
-    # shellcheck disable=SC1090
-    . "$CONFIG_FILE"
+    config_value() {
+        config_key=$1
+        awk -v wanted="$config_key" '
+            function trim(value) {
+                sub(/^[[:space:]]+/, "", value)
+                sub(/[[:space:]]+$/, "", value)
+                return value
+            }
+            {
+                line = $0
+                sub(/^[[:space:]]*/, "", line)
+                if (line == "" || substr(line, 1, 1) == "#") next
+                separator = index(line, "=")
+                if (separator == 0) next
+                key = trim(substr(line, 1, separator - 1))
+                if (key == wanted) {
+                    print trim(substr(line, separator + 1))
+                    found = 1
+                    exit
+                }
+            }
+            END { if (!found) exit 1 }
+        ' "$CONFIG_FILE"
+    }
 
-    : "${PROJECT_NAME:?PROJECT_NAME is required in ${CONFIG_FILE}}"
-    : "${COMPANY_REPO:=}"
-    : "${CLOUD_ROOT:?CLOUD_ROOT is required in ${CONFIG_FILE}}"
-    : "${CLOUD_LINK:=${PROJECT_ROOT}/remote/iCloud}"
-    : "${REPO_LINK:=${PROJECT_ROOT}/local/repo}"
+    if ! PROJECT_NAME=$(config_value name); then
+        die "name is required in ${CONFIG_FILE}"
+    fi
+    if ! CLOUD_ROOT=$(config_value cloud_root); then
+        die "cloud_root is required in ${CONFIG_FILE}"
+    fi
+    COMPANY_REPO=''
+    if COMPANY_REPO=$(config_value company_repo); then
+        :
+    fi
+    CLOUD_LINK="${PROJECT_ROOT}/remote/iCloud"
+    REPO_LINK="${PROJECT_ROOT}/local/repo"
 
     export PROJECT_NAME COMPANY_REPO CLOUD_ROOT CLOUD_LINK REPO_LINK
 }

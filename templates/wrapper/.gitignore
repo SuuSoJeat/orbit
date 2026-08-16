@@ -3,7 +3,7 @@
 /remote/*
 
 # Machine-specific configuration and local boundary links.
-/config/project.env
+/config/orbit.conf
 
 # Local operating-system and tooling noise.
 .DS_Store

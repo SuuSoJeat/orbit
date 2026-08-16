@@ -1,0 +1,707 @@
+#!/bin/sh
+
+set -eu
+
+CLI_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+TEMPLATE_ROOT="${CLI_ROOT}/templates/wrapper"
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+info() {
+    printf '%s\n' "$*"
+}
+
+usage() {
+    cat <<'EOF'
+Usage:
+  orbit new [NAME] [options]
+  orbit undo
+  orbit attach [WRAPPER_ROOT] REPOSITORY_PATH
+  orbit doctor [WRAPPER_ROOT]
+  orbit open [WRAPPER_ROOT] [--dry-run|--launch]
+
+Commands:
+  new       create an iCloud-first project and optionally its private wrapper
+  undo      remove a previously recorded orbit creation
+  attach    attach a canonical local Git repository to a wrapper
+  doctor    validate a wrapper's storage boundaries
+  open      show or open a wrapper's project surfaces
+
+Options for new:
+  --category companies|ventures
+  --company NAME
+  --client NAME
+  --no-client
+  --cloud-root PATH
+  --with-wrapper
+  --wrapper-root PATH
+EOF
+}
+
+version() {
+    cat "${CLI_ROOT}/VERSION"
+}
+
+prompt_for_name() {
+    name_kind=$1
+    printf 'New %s name: ' "$name_kind"
+    IFS= read -r candidate || die "could not read ${name_kind} name"
+    [ -n "$candidate" ] || die "${name_kind} name cannot be empty"
+    case "$candidate" in
+        */*) die "${name_kind} name cannot contain '/': ${candidate}" ;;
+    esac
+    SELECTED_NAME=$candidate
+}
+
+select_or_create() {
+    collection_root=$1
+    item_kind=$2
+    allow_none=$3
+    options_file=$(mktemp /private/tmp/orbit-options.XXXXXX)
+    find "$collection_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort > "$options_file"
+    option_count=$(wc -l < "$options_file" | tr -d ' ')
+    create_option=$((option_count + 1))
+    none_option=$((option_count + 2))
+
+    case "$item_kind" in
+        company) item_plural=companies ;;
+        client) item_plural=clients ;;
+        *) item_plural="${item_kind}s" ;;
+    esac
+    printf '\nAvailable %s:\n' "$item_plural"
+    if [ "$option_count" -eq 0 ]; then
+        printf '  (none found)\n'
+    else
+        option_number=1
+        while IFS= read -r option_path; do
+            printf '  %d) %s\n' "$option_number" "${option_path##*/}"
+            option_number=$((option_number + 1))
+        done < "$options_file"
+    fi
+    printf '  %d) Create new %s\n' "$create_option" "$item_kind"
+    if [ "$allow_none" -eq 1 ]; then
+        printf '  %d) No client (company-level orbit)\n' "$none_option"
+    fi
+
+    max_option=$create_option
+    [ "$allow_none" -eq 1 ] && max_option=$none_option
+    printf 'Select %s [1-%d]: ' "$item_kind" "$max_option"
+    IFS= read -r selection || die "could not read ${item_kind} selection"
+    case "$selection" in
+        ''|*[!0-9]*) die "invalid ${item_kind} selection: ${selection}" ;;
+    esac
+    [ "$selection" -ge 1 ] && [ "$selection" -le "$max_option" ] || die "invalid ${item_kind} selection: ${selection}"
+
+    if [ "$selection" -le "$option_count" ]; then
+        selected_path=$(sed -n "${selection}p" "$options_file")
+        SELECTED_NAME=${selected_path##*/}
+    elif [ "$selection" -eq "$create_option" ]; then
+        prompt_for_name "$item_kind"
+    else
+        SELECTED_NAME=''
+    fi
+    /bin/rm "$options_file"
+}
+
+select_wrapper() {
+    printf '\nPrivate wrapper:\n'
+    printf '  1) Create private wrapper\n'
+    printf '  2) No wrapper (iCloud only)\n'
+    printf 'Select wrapper [1-2]: '
+    IFS= read -r selection || die "could not read wrapper selection"
+    case "$selection" in
+        1) with_wrapper=1 ;;
+        2) with_wrapper=0 ;;
+        *) die "invalid wrapper selection: ${selection}" ;;
+    esac
+}
+
+slugify() {
+    printf '%s' "$1" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//'
+}
+
+shell_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+wrapper_root_is_valid() {
+    candidate_root=$1
+    [ -x "$candidate_root/bin/doctor" ] \
+        && [ -f "$candidate_root/config/orbit.conf" ]
+}
+
+infer_wrapper_root() {
+    candidate_root=$(CDPATH= cd -P -- "${PWD}" 2>/dev/null && pwd -P) \
+        || die "cannot determine the current directory"
+    while :; do
+        if wrapper_root_is_valid "$candidate_root"; then
+            printf '%s\n' "$candidate_root"
+            return 0
+        fi
+        [ "$candidate_root" = "/" ] && break
+        candidate_root=${candidate_root%/*}
+        [ -n "$candidate_root" ] || candidate_root=/
+    done
+    die "could not infer a wrapper root from ${PWD}; supply WRAPPER_ROOT explicitly"
+}
+
+orbit_state_root() {
+    if [ -n "${XDG_STATE_HOME:-}" ]; then
+        printf '%s/orbit\n' "$XDG_STATE_HOME"
+    else
+        printf '%s/.local/state/orbit\n' "$HOME"
+    fi
+}
+
+journal_init() {
+    creation_root="$(orbit_state_root)/creations"
+    mkdir -p "$creation_root"
+    creation_stamp=$(date '+%Y%m%d-%H%M%S')
+    creation_slug=$(slugify "$project_name")
+    journal_path="${creation_root}/${creation_stamp}-${creation_slug}.log"
+    journal_number=1
+    while [ -e "$journal_path" ]; do
+        journal_number=$((journal_number + 1))
+        journal_path="${creation_root}/${creation_stamp}-${creation_slug}-${journal_number}.log"
+    done
+    CREATION_LOG=$journal_path
+    {
+        printf 'format\t1\n'
+        printf 'timestamp\t%s\n' "$creation_stamp"
+        printf 'orbit\t%s\n' "$project_name"
+        printf 'status\tin-progress\n'
+    } > "$CREATION_LOG"
+}
+
+journal_command() {
+    [ -n "${CREATION_LOG:-}" ] || return 0
+    printf 'command\t%s\n' "$*" >> "$CREATION_LOG"
+}
+
+journal_path() {
+    [ -n "${CREATION_LOG:-}" ] || return 0
+    path_to_record=$1
+    if ! awk -F '\t' -v target="$path_to_record" \
+        '$1 == "path" && $2 == target { found = 1 } END { exit found ? 0 : 1 }' \
+        "$CREATION_LOG"; then
+        printf 'path\t%s\n' "$path_to_record" >> "$CREATION_LOG"
+    fi
+}
+
+journal_tree() {
+    tree_root=$1
+    find "$tree_root" -mindepth 1 -print 2>/dev/null \
+        | while IFS= read -r tree_path; do
+            journal_path "$tree_path"
+        done
+}
+
+ensure_directory() {
+    directory_path=$1
+    [ -d "$directory_path" ] && return 0
+    [ ! -e "$directory_path" ] && [ ! -L "$directory_path" ] \
+        || die "cannot create directory; path is not a directory: ${directory_path}"
+
+    parent_path=${directory_path%/*}
+    if [ -n "$parent_path" ] && [ "$parent_path" != "$directory_path" ] && [ ! -d "$parent_path" ]; then
+        ( ensure_directory "$parent_path" )
+    fi
+    journal_command "mkdir $(shell_quote "$directory_path")"
+    mkdir "$directory_path"
+    journal_path "$directory_path"
+}
+
+create_cloud_project() {
+    cloud_root=$1
+
+    ensure_directory "$cloud_root"
+    for folder in Notes References Assets Exports Private; do
+        ensure_directory "$cloud_root/$folder"
+    done
+}
+
+wrapper_is_empty_or_missing() {
+    wrapper_root=$1
+    [ ! -e "$wrapper_root" ] && return 0
+    [ -d "$wrapper_root" ] || return 1
+    [ -z "$(find "$wrapper_root" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]
+}
+
+config_value() {
+    config_key=$1
+    config_file=$2
+    awk -v wanted="$config_key" '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+        {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            if (line == "" || substr(line, 1, 1) == "#") next
+            separator = index(line, "=")
+            if (separator == 0) next
+            key = trim(substr(line, 1, separator - 1))
+            if (key == wanted) {
+                print trim(substr(line, separator + 1))
+                found = 1
+                exit
+            }
+        }
+        END { if (!found) exit 1 }
+    ' "$config_file"
+}
+
+wrapper_set_config_value() {
+    config_key=$1
+    config_value=$2
+    config_tmp="${WRAPPER_CONFIG_FILE}.tmp.$$"
+    awk -v wanted="$config_key" -v value="$config_value" '
+        function trim(text) {
+            sub(/^[[:space:]]+/, "", text)
+            sub(/[[:space:]]+$/, "", text)
+            return text
+        }
+        {
+            line = $0
+            left = line
+            sub(/^[[:space:]]*/, "", left)
+            separator = index(left, "=")
+            if (separator > 0 && trim(substr(left, 1, separator - 1)) == wanted) {
+                print wanted " = " value
+                found = 1
+            } else {
+                print line
+            }
+        }
+        END { if (!found) print wanted " = " value }
+    ' "$WRAPPER_CONFIG_FILE" > "$config_tmp"
+    mv "$config_tmp" "$WRAPPER_CONFIG_FILE"
+}
+
+wrapper_load_config() {
+    WRAPPER_PROJECT_ROOT=$1
+    WRAPPER_CONFIG_FILE="${WRAPPER_PROJECT_ROOT}/config/orbit.conf"
+    [ -f "$WRAPPER_CONFIG_FILE" ] \
+        || die "missing ${WRAPPER_CONFIG_FILE}; run orbit new with a wrapper"
+
+    if ! WRAPPER_PROJECT_NAME=$(config_value name "$WRAPPER_CONFIG_FILE"); then
+        die "name is required in ${WRAPPER_CONFIG_FILE}"
+    fi
+    if ! WRAPPER_CLOUD_ROOT=$(config_value cloud_root "$WRAPPER_CONFIG_FILE"); then
+        die "cloud_root is required in ${WRAPPER_CONFIG_FILE}"
+    fi
+    WRAPPER_COMPANY_REPO=''
+    if WRAPPER_COMPANY_REPO=$(config_value company_repo "$WRAPPER_CONFIG_FILE"); then
+        :
+    fi
+    WRAPPER_CLOUD_LINK="${WRAPPER_PROJECT_ROOT}/remote/iCloud"
+    WRAPPER_REPO_LINK="${WRAPPER_PROJECT_ROOT}/local/repo"
+}
+
+wrapper_physical_dir() {
+    CDPATH= cd -P -- "$1" && pwd -P
+}
+
+wrapper_ensure_link() {
+    link_path=$1
+    target_path=$2
+    link_label=$3
+
+    if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+        [ -L "$link_path" ] || die "refusing to replace non-symlink at ${link_path}"
+        link_target=$(wrapper_physical_dir "$link_path") \
+            || die "${link_label} symlink is broken: ${link_path}"
+        target_dir=$(wrapper_physical_dir "$target_path") \
+            || die "${link_label} target is not accessible: ${target_path}"
+        [ "$link_target" = "$target_dir" ] \
+            || die "${link_label} symlink points to ${link_target}, expected ${target_dir}"
+    else
+        ln -s "$target_path" "$link_path"
+        info "Created ${link_label} boundary symlink at ${link_path}"
+    fi
+}
+
+wrapper_initialize() {
+    wrapper_root=$1
+    wrapper_load_config "$wrapper_root"
+    create_cloud_project "$WRAPPER_CLOUD_ROOT"
+
+    if [ ! -d "${wrapper_root}/.git" ]; then
+        journal_command "git -C $(shell_quote "$wrapper_root") init"
+        git -C "$wrapper_root" init >/dev/null
+        info "Initialized wrapper Git repository"
+    fi
+
+    ensure_directory "${wrapper_root}/local"
+    ensure_directory "${wrapper_root}/remote"
+    wrapper_ensure_link "$WRAPPER_CLOUD_LINK" "$WRAPPER_CLOUD_ROOT" cloud
+
+    if [ -n "$WRAPPER_COMPANY_REPO" ] && [ -d "$WRAPPER_COMPANY_REPO" ]; then
+        wrapper_ensure_link "$WRAPPER_REPO_LINK" "$WRAPPER_COMPANY_REPO" repository
+    elif [ -n "$WRAPPER_COMPANY_REPO" ]; then
+        info "Repository attachment is configured but not present yet: ${WRAPPER_COMPANY_REPO}"
+    else
+        info "No company repository attached yet; the iCloud project can start independently."
+    fi
+
+    info "Orbit wrapper ready. Run orbit doctor."
+}
+
+create_wrapper() {
+    wrapper_root=$1
+    project_name=$2
+    cloud_root=$3
+
+    wrapper_is_empty_or_missing "$wrapper_root" || die "wrapper path is not empty: ${wrapper_root}"
+    wrapper_preexisted=0
+    if [ -e "$wrapper_root" ] || [ -L "$wrapper_root" ]; then
+        wrapper_preexisted=1
+    fi
+    ensure_directory "$wrapper_root"
+    journal_command "cp -R $(shell_quote "$TEMPLATE_ROOT/.") $(shell_quote "$wrapper_root/")"
+    cp -R "$TEMPLATE_ROOT"/. "$wrapper_root"/
+    [ "$wrapper_preexisted" -eq 0 ] || journal_tree "$wrapper_root"
+
+    journal_command "write $(shell_quote "$wrapper_root/config/orbit.conf")"
+    cat > "$wrapper_root/config/orbit.conf" <<EOF
+# Generated by orbit. Machine-specific; do not commit.
+name = ${project_name}
+company_repo =
+cloud_root = ${cloud_root}
+EOF
+
+    [ "$wrapper_preexisted" -eq 0 ] || journal_tree "$wrapper_root"
+    wrapper_initialize "$wrapper_root"
+    [ "$wrapper_preexisted" -eq 0 ] || journal_tree "$wrapper_root"
+}
+
+cmd_new() {
+    project_name=''
+    interactive=0
+    if [ "$#" -gt 0 ]; then
+        case "$1" in
+            --*) ;;
+            *) project_name=$1; shift ;;
+        esac
+    fi
+    [ -n "$project_name" ] || interactive=1
+
+    category=companies
+    company_name=''
+    client_name=''
+    no_client=0
+    cloud_root=''
+    with_wrapper=0
+    wrapper_root=''
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --category)
+                shift
+                [ "$#" -gt 0 ] || die "--category requires companies or ventures"
+                category=$1
+                ;;
+            --company)
+                shift
+                [ "$#" -gt 0 ] || die "--company requires a name"
+                company_name=$1
+                ;;
+            --client)
+                shift
+                [ "$#" -gt 0 ] || die "--client requires a name"
+                client_name=$1
+                ;;
+            --no-client) no_client=1 ;;
+            --cloud-root)
+                shift
+                [ "$#" -gt 0 ] || die "--cloud-root requires a path"
+                cloud_root=$1
+                ;;
+            --with-wrapper) with_wrapper=1 ;;
+            --wrapper-root)
+                shift
+                [ "$#" -gt 0 ] || die "--wrapper-root requires a path"
+                wrapper_root=$1
+                with_wrapper=1
+                ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "unknown option for new: $1" ;;
+        esac
+        shift
+    done
+
+    if [ -z "$project_name" ]; then
+        prompt_for_name orbit
+        project_name=$SELECTED_NAME
+    fi
+    [ -n "$project_name" ] || die "orbit name cannot be empty"
+    case "$project_name" in
+        */*) die "orbit name cannot contain '/': ${project_name}" ;;
+    esac
+    [ "$no_client" -eq 0 ] || [ -z "$client_name" ] || die "use either --client or --no-client, not both"
+
+    slug=$(slugify "$project_name")
+    [ -n "$slug" ] || die "orbit name must contain letters or numbers"
+
+    if [ -z "$cloud_root" ]; then
+        case "$category" in
+            companies)
+                cloud_base="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Career/Companies"
+                [ -z "$client_name" ] || [ -n "$company_name" ] || die "--client requires --company"
+                if [ -z "$company_name" ]; then
+                    interactive=1
+                    select_or_create "$cloud_base" company 0
+                    company_name=$SELECTED_NAME
+                fi
+                case "$company_name" in
+                    */*) die "company name cannot contain '/': ${company_name}" ;;
+                esac
+                company_root="${cloud_base}/${company_name}"
+                if [ "$no_client" -eq 0 ] && [ -z "$client_name" ]; then
+                    interactive=1
+                    select_or_create "${company_root}/Clients" client 1
+                    client_name=$SELECTED_NAME
+                fi
+                if [ -n "$client_name" ]; then
+                    case "$client_name" in
+                        */*) die "client name cannot contain '/': ${client_name}" ;;
+                    esac
+                    cloud_root="${company_root}/Clients/${client_name}/${project_name}"
+                else
+                    cloud_root="${company_root}/${project_name}"
+                fi
+                ;;
+            ventures)
+                [ -z "$company_name" ] && [ -z "$client_name" ] || die "company/client options require --category companies"
+                cloud_base="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Ventures/Software"
+                cloud_root="${cloud_base}/${project_name}"
+                ;;
+            *) die "category must be companies or ventures" ;;
+        esac
+    elif [ -n "$company_name" ] || [ -n "$client_name" ]; then
+        die "--company and --client cannot be combined with --cloud-root"
+    fi
+
+    if [ "$interactive" -eq 1 ] && [ "$with_wrapper" -eq 0 ]; then
+        select_wrapper
+    fi
+
+    journal_init
+    journal_command "orbit new $(shell_quote "$project_name") --category $(shell_quote "$category")"
+    create_cloud_project "$cloud_root"
+    info "Created or confirmed iCloud project: ${cloud_root}"
+
+    if [ "$with_wrapper" -eq 1 ]; then
+        if [ -z "$wrapper_root" ]; then
+            wrapper_root="${HOME}/Repositories/${slug}-orbit"
+        fi
+        create_wrapper "$wrapper_root" "$project_name" "$cloud_root"
+        info "Created private wrapper: ${wrapper_root}"
+    else
+        info "No wrapper created. Add one later with --with-wrapper."
+    fi
+    printf 'status\tcomplete\n' >> "$CREATION_LOG"
+    info "Creation recorded: ${CREATION_LOG}"
+}
+
+cmd_undo() {
+    [ "$#" -eq 0 ] || die "usage: orbit undo"
+    creation_root="$(orbit_state_root)/creations"
+    [ -d "$creation_root" ] || {
+        info "No Orbit creations recorded."
+        return 0
+    }
+
+    log_list=$(mktemp /private/tmp/orbit-undo.XXXXXX)
+    find "$creation_root" -type f -name '*.log' -print 2>/dev/null | sort > "$log_list"
+    log_count=$(wc -l < "$log_list" | tr -d ' ')
+    if [ "$log_count" -eq 0 ]; then
+        /bin/rm "$log_list"
+        info "No Orbit creations recorded."
+        return 0
+    fi
+
+    printf '\nRecorded Orbit creations:\n'
+    log_number=1
+    while IFS= read -r log_path; do
+        log_timestamp=$(awk -F '\t' '$1 == "timestamp" { print $2; exit }' "$log_path")
+        log_orbit=$(awk -F '\t' '$1 == "orbit" { print $2; exit }' "$log_path")
+        log_status=$(awk -F '\t' '$1 == "status" { value = $2 } END { print value }' "$log_path")
+        printf '  %d) %s — %s [%s]\n' "$log_number" "$log_orbit" "$log_timestamp" "$log_status"
+        log_number=$((log_number + 1))
+    done < "$log_list"
+
+    printf 'Select creation [1-%d]: ' "$log_count"
+    IFS= read -r selection || die "could not read undo selection"
+    case "$selection" in
+        ''|*[!0-9]*) die "invalid undo selection: ${selection}" ;;
+    esac
+    [ "$selection" -ge 1 ] && [ "$selection" -le "$log_count" ] || die "invalid undo selection: ${selection}"
+
+    selected_log=$(sed -n "${selection}p" "$log_list")
+    selected_orbit=$(awk -F '\t' '$1 == "orbit" { print $2; exit }' "$selected_log")
+    selected_paths=$(mktemp /private/tmp/orbit-undo-paths.XXXXXX)
+    awk -F '\t' '$1 == "path" { print length($2) "\t" $2 }' "$selected_log" \
+        | sort -rn > "$selected_paths"
+    path_count=$(wc -l < "$selected_paths" | tr -d ' ')
+
+    printf '\nSelected: %s\n' "$selected_orbit"
+    printf 'Recorded commands: %s\n' "$(awk -F '\t' '$1 == "command" { count += 1 } END { print count + 0 }' "$selected_log")"
+    printf 'Recorded paths to remove: %s\n' "$path_count"
+    printf 'Preview of paths to remove:\n'
+    while IFS="$(printf '\t')" read -r path_length path_to_remove; do
+        [ -n "$path_to_remove" ] || continue
+        if [ -L "$path_to_remove" ]; then
+            preview_type=symlink
+        elif [ -f "$path_to_remove" ]; then
+            preview_type=file
+        elif [ -d "$path_to_remove" ]; then
+            preview_type=directory
+        else
+            preview_type=already-absent
+        fi
+        printf '  - [%s] %s\n' "$preview_type" "$path_to_remove"
+    done < "$selected_paths"
+    printf 'Remove this creation and its recorded files/folders? [y/N]: '
+    IFS= read -r confirmation || die "could not read undo confirmation"
+    case "$confirmation" in
+        y|Y|yes|YES) ;;
+        *)
+            /bin/rm "$selected_paths" "$log_list"
+            info "Undo cancelled."
+            return 0
+            ;;
+    esac
+
+    printf '\nDeleting recorded paths:\n'
+    while IFS="$(printf '\t')" read -r path_length path_to_remove; do
+        [ -n "$path_to_remove" ] || continue
+        case "$path_to_remove" in
+            "$HOME/Library"|"$HOME/Library/"*|"$HOME/Repositories"|"$HOME/Repositories/"*) ;;
+            *) die "refusing to remove unsafe recorded path: ${path_to_remove}" ;;
+        esac
+        case "$path_to_remove" in
+            *'/../'*|*'/..'|../*) die "refusing to remove unresolved recorded path: ${path_to_remove}" ;;
+        esac
+        if [ -L "$path_to_remove" ]; then
+            /bin/rm -f "$path_to_remove"
+            info "  deleted symlink: ${path_to_remove}"
+        elif [ -f "$path_to_remove" ]; then
+            /bin/rm -f "$path_to_remove"
+            info "  deleted file: ${path_to_remove}"
+        elif [ -d "$path_to_remove" ]; then
+            /bin/rm -rf "$path_to_remove"
+            info "  deleted directory recursively: ${path_to_remove}"
+        else
+            info "  already absent: ${path_to_remove}"
+        fi
+    done < "$selected_paths"
+
+    /bin/rm "$selected_paths" "$log_list" "$selected_log"
+    info "Removed recorded creation: ${selected_orbit}"
+}
+
+cmd_attach() {
+    case "$#" in
+        1)
+            wrapper_root=$(infer_wrapper_root)
+            repository_path=$1
+            ;;
+        2)
+            wrapper_root=$1
+            repository_path=$2
+            ;;
+        *) die "usage: orbit attach [WRAPPER_ROOT] REPOSITORY_PATH" ;;
+    esac
+    wrapper_load_config "$wrapper_root"
+    wrapper_set_config_value company_repo "$repository_path"
+    wrapper_initialize "$wrapper_root"
+}
+
+cmd_doctor() {
+    case "$#" in
+        0) wrapper_root=$(infer_wrapper_root) ;;
+        1) wrapper_root=$1 ;;
+        *) die "usage: orbit doctor [WRAPPER_ROOT]" ;;
+    esac
+    [ -x "$wrapper_root/bin/doctor" ] || die "wrapper doctor not found: ${wrapper_root}"
+    "$wrapper_root/bin/doctor"
+}
+
+cmd_open() {
+    wrapper_root=''
+    if [ "$#" -eq 0 ]; then
+        wrapper_root=$(infer_wrapper_root)
+    else
+        case "$1" in
+            --dry-run|--launch) wrapper_root=$(infer_wrapper_root) ;;
+            *) wrapper_root=$1; shift ;;
+        esac
+    fi
+    wrapper_load_config "$wrapper_root"
+
+    dry_run=1
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --dry-run) dry_run=1 ;;
+            --launch) dry_run=0 ;;
+            -h|--help)
+                printf 'Usage: orbit open [WRAPPER_ROOT] [--dry-run|--launch]\n'
+                exit 0
+                ;;
+            *) die "unknown option for open: $1" ;;
+        esac
+        shift
+    done
+
+    printf 'wrapper: %s\n' "$WRAPPER_PROJECT_ROOT"
+    if [ -n "$WRAPPER_COMPANY_REPO" ]; then
+        printf 'company: %s\n' "$WRAPPER_COMPANY_REPO"
+    else
+        printf 'company: (not attached yet)\n'
+    fi
+    printf 'cloud:   %s\n' "$WRAPPER_CLOUD_ROOT"
+
+    if [ "$dry_run" -eq 1 ]; then
+        printf '\nDry run only. Use --launch to open Finder, Terminal, and the configured editor.\n'
+        return 0
+    fi
+
+    command -v open >/dev/null 2>&1 || die "macOS open command is unavailable"
+    open "$WRAPPER_CLOUD_LINK"
+    open -a Terminal "$WRAPPER_PROJECT_ROOT"
+
+    if [ -z "$WRAPPER_COMPANY_REPO" ]; then
+        printf 'Editor not opened: no company repository is attached yet.\n' >&2
+    elif [ -n "${EDITOR_APP:-}" ]; then
+        open -a "$EDITOR_APP" "$WRAPPER_COMPANY_REPO"
+    elif [ -d "/Applications/Visual Studio Code.app" ]; then
+        open -a "Visual Studio Code" "$WRAPPER_COMPANY_REPO"
+    elif [ -d "/Applications/Cursor.app" ]; then
+        open -a "Cursor" "$WRAPPER_COMPANY_REPO"
+    else
+        printf 'Editor not opened: set EDITOR_APP or install Visual Studio Code/Cursor.\n' >&2
+    fi
+}
+
+[ "$#" -gt 0 ] || { usage >&2; exit 1; }
+
+command=$1
+shift
+case "$command" in
+    new) cmd_new "$@" ;;
+    undo) cmd_undo "$@" ;;
+    attach) cmd_attach "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    open) cmd_open "$@" ;;
+    --version|-V) version ;;
+    -h|--help) usage ;;
+    *) usage >&2; die "unknown command: ${command}" ;;
+esac

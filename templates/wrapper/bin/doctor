@@ -73,7 +73,7 @@ company_is_not_in_cloud() {
     esac
 }
 
-printf 'Studio context doctor\n\n'
+printf 'Orbit context doctor\n\n'
 run_check "wrapper is a Git repository" wrapper_is_git_repo
 run_check "cloud project directory exists" cloud_is_directory
 run_check "cloud boundary symlink resolves correctly" cloud_link_is_correct
