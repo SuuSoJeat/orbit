@@ -3,7 +3,7 @@
 set -eu
 
 CLI_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
-FIXTURE=$(mktemp -d /private/tmp/orbit-test.XXXXXX)
+FIXTURE=$(mktemp -d "${TMPDIR:-/tmp}/orbit-test.XXXXXX")
 FIXTURE_HOME="${FIXTURE}/home"
 export HOME="$FIXTURE_HOME"
 
@@ -30,7 +30,7 @@ printf '1\n1\n2\n' \
 EXISTING_CLOUD_ROOT="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/SuuSoJeat/Career/Companies/Example Company/Clients/Example Client/Example Project Platform 2"
 [ -d "$EXISTING_CLOUD_ROOT/Notes" ]
 
-UNDO_INPUT=$(mktemp /private/tmp/orbit-undo-input.XXXXXX)
+UNDO_INPUT=$(mktemp "${TMPDIR:-/tmp}/orbit-undo-input.XXXXXX")
 UNDO_SELECTION=$(find "${HOME}/.local/state/orbit/creations" -type f -name '*.log' -print | sort \
     | awk '/example-project-platform-2\.log$/ { print NR; exit }')
 printf '%s\ny\n' "$UNDO_SELECTION" > "$UNDO_INPUT"
@@ -49,7 +49,7 @@ grep -F "company_repo = ${REPOSITORY_ROOT}" "$WRAPPER_ROOT/config/orbit.conf" >/
 "$CLI_ROOT/bin/orbit" doctor "$WRAPPER_ROOT"
 (cd "$WRAPPER_ROOT/PrivateNotes" && "$CLI_ROOT/bin/orbit" attach "$REPOSITORY_ROOT")
 
-UNDO_INPUT=$(mktemp /private/tmp/orbit-undo-input.XXXXXX)
+UNDO_INPUT=$(mktemp "${TMPDIR:-/tmp}/orbit-undo-input.XXXXXX")
 printf '1\ny\n' > "$UNDO_INPUT"
 "$CLI_ROOT/bin/orbit" undo < "$UNDO_INPUT"
 /bin/rm "$UNDO_INPUT"

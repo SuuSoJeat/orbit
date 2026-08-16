@@ -60,7 +60,7 @@ select_or_create() {
     collection_root=$1
     item_kind=$2
     allow_none=$3
-    options_file=$(mktemp /private/tmp/orbit-options.XXXXXX)
+    options_file=$(mktemp "${TMPDIR:-/tmp}/orbit-options.XXXXXX")
     find "$collection_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort > "$options_file"
     option_count=$(wc -l < "$options_file" | tr -d ' ')
     create_option=$((option_count + 1))
@@ -519,7 +519,7 @@ cmd_undo() {
         return 0
     }
 
-    log_list=$(mktemp /private/tmp/orbit-undo.XXXXXX)
+    log_list=$(mktemp "${TMPDIR:-/tmp}/orbit-undo.XXXXXX")
     find "$creation_root" -type f -name '*.log' -print 2>/dev/null | sort > "$log_list"
     log_count=$(wc -l < "$log_list" | tr -d ' ')
     if [ "$log_count" -eq 0 ]; then
@@ -547,7 +547,7 @@ cmd_undo() {
 
     selected_log=$(sed -n "${selection}p" "$log_list")
     selected_orbit=$(awk -F '\t' '$1 == "orbit" { print $2; exit }' "$selected_log")
-    selected_paths=$(mktemp /private/tmp/orbit-undo-paths.XXXXXX)
+    selected_paths=$(mktemp "${TMPDIR:-/tmp}/orbit-undo-paths.XXXXXX")
     awk -F '\t' '$1 == "path" { print length($2) "\t" $2 }' "$selected_log" \
         | sort -rn > "$selected_paths"
     path_count=$(wc -l < "$selected_paths" | tr -d ' ')
