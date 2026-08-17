@@ -26,9 +26,15 @@ templates/wrapper/
 ├── AGENTS.md
 ├── README.md
 ├── bin/doctor
-├── bin/lib.sh
 └── config/orbit.conf.example
 ```
+
+The main CLI is intentionally a small dispatcher. Its implementation modules
+live under [`bin/lib`](bin/lib). The canonical generated-wrapper runtime is
+[`bin/lib/wrapper_runtime.sh`](bin/lib/wrapper_runtime.sh); wrapper creation
+copies it into generated wrappers as `bin/lib.sh` so those wrappers remain
+self-contained. When run from this checkout, the template doctor falls back to
+that canonical runtime.
 
 Update the template documentation when changing the wrapper contract. The
 template's `bin/doctor` is the ownership and hygiene contract for generated
