@@ -53,7 +53,7 @@ release: test build
 		printf '  sha256 "%s"\n\n' "$$archive_sha256"; \
 		printf '  def install\n'; \
 		printf '    libexec.install "bin", "templates", "VERSION", "README.md", "Makefile"\n'; \
-		printf '    bin.install_symlink libexec/"bin/orbit"\n'; \
+		printf '    bin.write_exec_script libexec/"bin/orbit"\n'; \
 		printf '  end\n\n'; \
 		printf '  test do\n'; \
 		printf '    assert_equal version.to_s, shell_output("#{bin}/orbit --version").chomp\n'; \
