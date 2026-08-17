@@ -46,20 +46,18 @@ load_config() {
         ' "$CONFIG_FILE"
     }
 
-    if ! PROJECT_NAME=$(config_value name); then
-        die "name is required in ${CONFIG_FILE}"
-    fi
-    if ! CLOUD_ROOT=$(config_value cloud_root); then
-        die "cloud_root is required in ${CONFIG_FILE}"
-    fi
-    COMPANY_REPO=''
-    if COMPANY_REPO=$(config_value company_repo); then
+    PROJECT_NAME=$(config_value project_name) \
+        || die "project_name is required in ${CONFIG_FILE}"
+    ICLOUD_PROJECT_PATH=$(config_value icloud_project_path) \
+        || die "icloud_project_path is required in ${CONFIG_FILE}"
+    REPOSITORY_PATH=''
+    if REPOSITORY_PATH=$(config_value repository_path); then
         :
     fi
-    CLOUD_LINK="${PROJECT_ROOT}/remote/iCloud"
+    ICLOUD_PROJECT_LINK="${PROJECT_ROOT}/remote/iCloud"
     REPO_LINK="${PROJECT_ROOT}/local/repo"
 
-    export PROJECT_NAME COMPANY_REPO CLOUD_ROOT CLOUD_LINK REPO_LINK
+    export PROJECT_NAME REPOSITORY_PATH ICLOUD_PROJECT_PATH ICLOUD_PROJECT_LINK REPO_LINK
 }
 
 relative_to_root() {

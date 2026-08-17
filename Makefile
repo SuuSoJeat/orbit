@@ -47,7 +47,7 @@ release: test build
 	@archive_sha256=$$(awk '{ print $$1 }' "$(ARCHIVE).sha256"); \
 	{ \
 		printf 'class Orbit < Formula\n'; \
-		printf '  desc "iCloud-first project context CLI"\n'; \
+		printf '  desc "iCloud-first project workspace CLI"\n'; \
 		printf '  homepage "https://github.com/SuuSoJeat/orbit"\n'; \
 		printf '  url "https://github.com/SuuSoJeat/orbit/releases/download/v%s/orbit-%s.tar.gz"\n' "$(VERSION)" "$(VERSION)"; \
 		printf '  sha256 "%s"\n\n' "$$archive_sha256"; \

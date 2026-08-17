@@ -20,11 +20,11 @@ wrapper_is_git_repo() {
     [ "$(git -C "$PROJECT_ROOT" rev-parse --show-toplevel 2>/dev/null)" = "$PROJECT_ROOT" ]
 }
 
-company_is_git_repo() {
-    [ -d "$COMPANY_REPO" ] || return 1
-    COMPANY_TOP=$(git -C "$COMPANY_REPO" rev-parse --show-toplevel 2>/dev/null) || return 1
-    COMPANY_PHYSICAL=$(physical_dir "$COMPANY_REPO") || return 1
-    [ "$COMPANY_TOP" = "$COMPANY_PHYSICAL" ]
+repository_is_git_repo() {
+    [ -d "$REPOSITORY_PATH" ] || return 1
+    REPOSITORY_TOP=$(git -C "$REPOSITORY_PATH" rev-parse --show-toplevel 2>/dev/null) || return 1
+    REPOSITORY_PHYSICAL=$(physical_dir "$REPOSITORY_PATH") || return 1
+    [ "$REPOSITORY_TOP" = "$REPOSITORY_PHYSICAL" ]
 }
 
 repo_link_is_ignored() {
@@ -32,62 +32,62 @@ repo_link_is_ignored() {
     git -C "$PROJECT_ROOT" check-ignore -q -- "$RELATIVE_REPO_LINK"
 }
 
-cloud_is_directory() {
-    [ -d "$CLOUD_ROOT" ]
+icloud_project_is_directory() {
+    [ -d "$ICLOUD_PROJECT_PATH" ]
 }
 
-cloud_link_is_correct() {
-    [ -L "$CLOUD_LINK" ] || return 1
-    [ "$(physical_dir "$CLOUD_LINK")" = "$(physical_dir "$CLOUD_ROOT")" ]
+icloud_project_link_is_correct() {
+    [ -L "$ICLOUD_PROJECT_LINK" ] || return 1
+    [ "$(physical_dir "$ICLOUD_PROJECT_LINK")" = "$(physical_dir "$ICLOUD_PROJECT_PATH")" ]
 }
 
 repo_link_is_correct() {
-    [ -n "$COMPANY_REPO" ] || return 1
+    [ -n "$REPOSITORY_PATH" ] || return 1
     [ -L "$REPO_LINK" ] || return 1
-    [ "$(physical_dir "$REPO_LINK")" = "$(physical_dir "$COMPANY_REPO")" ]
+    [ "$(physical_dir "$REPO_LINK")" = "$(physical_dir "$REPOSITORY_PATH")" ]
 }
 
-company_is_outside_wrapper() {
-    COMPANY_PHYSICAL=$(physical_dir "$COMPANY_REPO") || return 1
+repository_is_outside_wrapper() {
+    REPOSITORY_PHYSICAL=$(physical_dir "$REPOSITORY_PATH") || return 1
     WRAPPER_PHYSICAL=$(physical_dir "$PROJECT_ROOT") || return 1
-    case "$COMPANY_PHYSICAL/" in
+    case "$REPOSITORY_PHYSICAL/" in
         "$WRAPPER_PHYSICAL"/*) return 1 ;;
         *) return 0 ;;
     esac
 }
 
-cloud_has_no_git_metadata() {
-    [ -z "$(find "$CLOUD_ROOT" -name .git -print -prune 2>/dev/null)" ]
+icloud_project_has_no_git_metadata() {
+    [ -z "$(find "$ICLOUD_PROJECT_PATH" -name .git -print -prune 2>/dev/null)" ]
 }
 
-cloud_has_no_dependencies() {
-    [ -z "$(find "$CLOUD_ROOT" -name node_modules -print -prune 2>/dev/null)" ]
+icloud_project_has_no_dependencies() {
+    [ -z "$(find "$ICLOUD_PROJECT_PATH" -name node_modules -print -prune 2>/dev/null)" ]
 }
 
-company_is_not_in_cloud() {
-    COMPANY_PHYSICAL=$(physical_dir "$COMPANY_REPO") || return 1
-    CLOUD_PHYSICAL=$(physical_dir "$CLOUD_ROOT") || return 1
-    case "$COMPANY_PHYSICAL/" in
-        "$CLOUD_PHYSICAL"/*) return 1 ;;
+repository_is_outside_icloud_project() {
+    REPOSITORY_PHYSICAL=$(physical_dir "$REPOSITORY_PATH") || return 1
+    ICLOUD_PROJECT_PHYSICAL=$(physical_dir "$ICLOUD_PROJECT_PATH") || return 1
+    case "$REPOSITORY_PHYSICAL/" in
+        "$ICLOUD_PROJECT_PHYSICAL"/*) return 1 ;;
         *) return 0 ;;
     esac
 }
 
-printf 'Orbit context doctor\n\n'
+printf 'Orbit project health check\n\n'
 run_check "wrapper is a Git repository" wrapper_is_git_repo
-run_check "cloud project directory exists" cloud_is_directory
-run_check "cloud boundary symlink resolves correctly" cloud_link_is_correct
-run_check "cloud project contains no .git directories" cloud_has_no_git_metadata
-run_check "cloud project contains no node_modules directories" cloud_has_no_dependencies
+run_check "iCloud project directory exists" icloud_project_is_directory
+run_check "iCloud project link resolves correctly" icloud_project_link_is_correct
+run_check "iCloud project contains no .git directories" icloud_project_has_no_git_metadata
+run_check "iCloud project contains no node_modules directories" icloud_project_has_no_dependencies
 
-if [ -z "$COMPANY_REPO" ]; then
-    printf 'INFO company repository is not attached yet (optional)\n'
+if [ -z "$REPOSITORY_PATH" ]; then
+    printf 'INFO repository is not attached yet (optional)\n'
 else
-    run_check "company repository exists independently" company_is_git_repo
-    run_check "company repository is outside wrapper" company_is_outside_wrapper
-    run_check "repository boundary symlink is ignored by wrapper" repo_link_is_ignored
-    run_check "repository boundary symlink resolves correctly" repo_link_is_correct
-    run_check "company repository is outside cloud project" company_is_not_in_cloud
+    run_check "repository exists independently" repository_is_git_repo
+    run_check "repository is outside wrapper" repository_is_outside_wrapper
+    run_check "repository link is ignored by wrapper" repo_link_is_ignored
+    run_check "repository link resolves correctly" repo_link_is_correct
+    run_check "repository is outside iCloud project" repository_is_outside_icloud_project
 fi
 
 if [ "$FAILURES" -ne 0 ]; then
