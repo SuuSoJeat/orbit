@@ -20,6 +20,10 @@ expand_config_path() {
     esac
 }
 
+consumer_icloud_root() {
+    printf '%s/Library/Mobile Documents/com~apple~CloudDocs\n' "$HOME"
+}
+
 validate_config_path() {
     config_key=$1
     config_path_value=$2
@@ -32,8 +36,8 @@ validate_config_path() {
 
 load_consumer_config() {
     CONSUMER_CONFIG_FILE=$(consumer_config_path)
-    CONSUMER_COMPANIES_ROOT="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies"
-    CONSUMER_VENTURES_ROOT="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures"
+    CONSUMER_COMPANIES_ROOT="$(consumer_icloud_root)/Workspace/Companies"
+    CONSUMER_VENTURES_ROOT="$(consumer_icloud_root)/Workspace/Ventures"
     CONSUMER_REPOSITORY_ROOT="${HOME}/Repositories"
     CONSUMER_WRAPPER_ROOT=''
 
@@ -73,8 +77,8 @@ load_consumer_config() {
 
 cmd_config_init() {
     config_file=$(consumer_config_path)
-    companies_root="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies"
-    ventures_root="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures"
+    companies_root="$(consumer_icloud_root)/Workspace/Companies"
+    ventures_root="$(consumer_icloud_root)/Workspace/Ventures"
     repository_root="${HOME}/Repositories"
     wrapper_root=''
     icloud_profile=''
@@ -132,10 +136,10 @@ EOF
         */*|.|..) die "--icloud-profile must be a single directory name: ${icloud_profile}" ;;
     esac
     if [ -n "$icloud_profile" ]; then
-        icloud_workspace_root="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/${icloud_profile}/Workspace"
-        [ "$companies_root" = "${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies" ] \
+        icloud_workspace_root="$(consumer_icloud_root)/${icloud_profile}/Workspace"
+        [ "$companies_root" = "$(consumer_icloud_root)/Workspace/Companies" ] \
             && companies_root="${icloud_workspace_root}/Companies"
-        [ "$ventures_root" = "${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures" ] \
+        [ "$ventures_root" = "$(consumer_icloud_root)/Workspace/Ventures" ] \
             && ventures_root="${icloud_workspace_root}/Ventures"
     fi
     [ -n "$repository_root" ] || die "--repository-root cannot be empty"

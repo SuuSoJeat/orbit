@@ -11,13 +11,34 @@ CLI_ROOT=$TEST_ROOT
 new_fixture
 
 DEFAULT_HOME="${FIXTURE}/default-home"
-DEFAULT_WORKSPACE="${DEFAULT_HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace"
+DEFAULT_WORKSPACE="${DEFAULT_HOME}/Library/Mobile Documents/com~apple~CloudDocs/Workspace"
 env -u ORBIT_CONFIG HOME="$DEFAULT_HOME" "$CLI_ROOT/bin/orbit" new "Default Venture" --category ventures
 [ -d "$DEFAULT_WORKSPACE/Ventures/Default Venture/Notes" ]
 
 ONE_OFF_ROOT="${FIXTURE}/one-off-icloud-project"
 env -u ORBIT_CONFIG HOME="$DEFAULT_HOME" "$CLI_ROOT/bin/orbit" new "One-off Project" --icloud-root "$ONE_OFF_ROOT"
 [ -d "$ONE_OFF_ROOT/Notes" ]
+
+DEFAULT_CONFIG_HOME="${FIXTURE}/configured-home"
+DEFAULT_CONFIG_VENTURES_ROOT="${FIXTURE}/configured-icloud/Ventures"
+env -u ORBIT_CONFIG HOME="$DEFAULT_CONFIG_HOME" "$CLI_ROOT/bin/orbit" config init \
+    --ventures-root "$DEFAULT_CONFIG_VENTURES_ROOT" \
+    --repository-root "${FIXTURE}/configured-repositories" >/dev/null
+env -u ORBIT_CONFIG HOME="$DEFAULT_CONFIG_HOME" "$CLI_ROOT/bin/orbit" new \
+    "Default Config Venture" --category ventures
+[ -d "$DEFAULT_CONFIG_VENTURES_ROOT/Default Config Venture/Notes" ]
+[ ! -d "$DEFAULT_CONFIG_HOME/Library/Mobile Documents/com~apple~CloudDocs/Workspace/Ventures/Default Config Venture" ]
+
+UPDATED_CONFIG_VENTURES_ROOT="${FIXTURE}/updated-configured-icloud/Ventures"
+awk -v root="$UPDATED_CONFIG_VENTURES_ROOT" \
+    '{ if ($1 == "ventures_root") print "ventures_root = " root; else print }' \
+    "$DEFAULT_CONFIG_HOME/.config/orbit/config" \
+    > "$FIXTURE/updated-config"
+mv "$FIXTURE/updated-config" "$DEFAULT_CONFIG_HOME/.config/orbit/config"
+env -u ORBIT_CONFIG HOME="$DEFAULT_CONFIG_HOME" "$CLI_ROOT/bin/orbit" new \
+    "Edited Config Venture" --category ventures
+[ -d "$UPDATED_CONFIG_VENTURES_ROOT/Edited Config Venture/Notes" ]
+[ ! -d "$DEFAULT_CONFIG_VENTURES_ROOT/Edited Config Venture" ]
 
 if env -u ORBIT_CONFIG HOME="$DEFAULT_HOME" "$CLI_ROOT/bin/orbit" new "Legacy Flag" --cloud-root "$FIXTURE" >/dev/null 2>&1; then
     fail "removed --cloud-root unexpectedly accepted"
@@ -61,7 +82,7 @@ SECOND_VENTURES_ROOT="${FIXTURE}/other-icloud/Ventures/Software"
 [ -d "$SECOND_VENTURES_ROOT/Other Consumer Venture/Notes" ]
 
 PROFILE_CONFIG="${FIXTURE}/profile-consumer.conf"
-PROFILE_WORKSPACE="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Alice/Workspace"
+PROFILE_WORKSPACE="${HOME}/Library/Mobile Documents/com~apple~CloudDocs/Alice/Workspace"
 "$CLI_ROOT/bin/orbit" --config "$PROFILE_CONFIG" config init \
     --icloud-profile Alice \
     --repository-root "${FIXTURE}/profile-repositories"

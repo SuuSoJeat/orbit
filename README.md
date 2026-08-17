@@ -81,15 +81,15 @@ With no configuration file, Orbit uses these defaults:
 
 ```text
 ~/Repositories
-~/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Companies
-~/Library/Mobile Documents/com~apple~CloudDocs/iCloud/Workspace/Ventures
+~/Library/Mobile Documents/com~apple~CloudDocs/Workspace/Companies
+~/Library/Mobile Documents/com~apple~CloudDocs/Workspace/Ventures
 ```
 
 The configuration is stored at `~/.config/orbit/config`, or at the path
 specified by `ORBIT_CONFIG` or the global `--config PATH` option. It is
 consumer-specific and should not be committed. Use `orbit config show` to
-inspect the resolved paths. To add an explicit namespace below `iCloud`, use
-`orbit config init --icloud-profile NAME`.
+inspect the resolved paths. To add an explicit namespace below the iCloud
+Drive root, use `orbit config init --icloud-profile NAME`.
 
 Attach an existing canonical repository:
 
