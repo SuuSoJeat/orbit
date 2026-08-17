@@ -10,7 +10,7 @@ Orbit is a POSIX shell CLI with a macOS-facing iCloud workflow. Keep the three
 ownership boundaries intact:
 
 ```text
-remote/iCloud  → synced documents, notes, assets, and exports
+remote/iCloud  → the synced iCloud project: documents, notes, assets, exports
 local/repo     → ignored symlink to a canonical Git repository
 config/        → ignored machine-specific wrapper settings
 ```

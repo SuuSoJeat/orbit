@@ -1,14 +1,15 @@
-# Orbit Context Template
+# Orbit Wrapper Template
 
-This is a private context template for orbits that combine:
+This is a local wrapper template for projects that combine:
 
 - documents and assets that should sync through iCloud;
 - one or more independent Git repositories; and
-- optional private, local-only orchestration.
+- optional local-only orchestration.
 
-The iCloud orbit is the human-facing starting point. Git repositories are
-attached later, and this local context is an optional control plane. The
-context never owns company source files and never puts Git metadata in iCloud.
+The iCloud project is the human-facing starting point. A canonical Git
+repository can be attached later, and this wrapper is optional local control
+plane. The wrapper never owns source files and never puts Git metadata in
+iCloud.
 
 ## Layout
 
@@ -28,14 +29,15 @@ project-orbit/
 └── README.md
 ```
 
-The canonical company repository lives separately under the consumer's
-configured `repository_root`.
+The canonical repository lives separately under the consumer's configured
+`repository_root`.
 The `local/repo` symlink is only a local convenience view, while
 `remote/iCloud` exposes the synced document project. Both symlinks and
 `config/orbit.conf` are intentionally ignored by the wrapper repository.
 
-`config/orbit.conf` is a small plain-text key-value file. It stores the orbit
-name, optional canonical repository path, and iCloud root. Orbit derives the
+`config/orbit.conf` is a small plain-text key-value file. It stores the
+project name, optional canonical repository path, and iCloud project path.
+Orbit derives the
 two local symlink paths from the wrapper root, so they do not become stale
 configuration values.
 
@@ -56,8 +58,8 @@ scripts and configuration; it does not provide a second public CLI.
 
 ## Storage contract
 
-The context repository owns its scripts and configuration templates. The
-canonical company repository owns its source code. iCloud owns notes,
+The wrapper repository owns its scripts and configuration templates. The
+canonical repository owns source code. iCloud owns notes,
 references, assets, exports, and other sync-worthy documents. Keep secrets,
 credentials, `.git` directories, dependencies, and build output out of the
 iCloud project.

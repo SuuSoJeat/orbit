@@ -1,4 +1,4 @@
-# Orbit context conventions
+# Orbit wrapper conventions
 
 - Keep canonical Git repositories outside this wrapper, normally below the
   consumer's configured `repository_root`.
