@@ -31,6 +31,58 @@ config_value() {
     ' "$config_file"
 }
 
+config_repository_entries() {
+    config_file=$1
+    awk '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+        function emit_section() {
+            if (section_name != "" && section_path != "") {
+                print section_name "\t" section_path
+            }
+        }
+        function emit_legacy(value, name) {
+            value = trim(value)
+            if (value == "") return
+            name = value
+            sub(/^.*\//, "", name)
+            print name "\t" value
+        }
+        {
+            line = $0
+            sub(/^[[:space:]]*/, "", line)
+            if (line == "" || substr(line, 1, 1) == "#") next
+            if (line ~ /^\[repository[[:space:]]+"[^"]+"[[:space:]]*\]$/) {
+                emit_section()
+                section_name = line
+                sub(/^\[repository[[:space:]]+"/, "", section_name)
+                sub(/"[[:space:]]*\]$/, "", section_name)
+                section_path = ""
+                next
+            }
+            if (substr(line, 1, 1) == "[") {
+                emit_section()
+                section_name = ""
+                section_path = ""
+                next
+            }
+            separator = index(line, "=")
+            if (separator == 0) next
+            key = trim(substr(line, 1, separator - 1))
+            value = trim(substr(line, separator + 1))
+            if (section_name != "") {
+                if (key == "path") section_path = value
+            } else if (key == "repository_path") {
+                emit_legacy(value)
+            }
+        }
+        END { emit_section() }
+    ' "$config_file"
+}
+
 load_wrapper_config() {
     PROJECT_ROOT=$1
     CONFIG_FILE="${PROJECT_ROOT}/config/orbit.conf"
@@ -43,14 +95,16 @@ load_wrapper_config() {
         || die "project_name is required in ${CONFIG_FILE}"
     ICLOUD_PROJECT_PATH=$(config_value icloud_project_path "$CONFIG_FILE") \
         || die "icloud_project_path is required in ${CONFIG_FILE}"
-    REPOSITORY_PATH=''
-    if REPOSITORY_PATH=$(config_value repository_path "$CONFIG_FILE"); then
-        :
-    fi
+    REPOSITORY_ENTRIES=$(config_repository_entries "$CONFIG_FILE")
+    REPOSITORY_PATHS=$(printf '%s\n' "$REPOSITORY_ENTRIES" \
+        | awk -F '\t' 'NF >= 2 { print $2 }')
+    REPOSITORY_PATH=$(printf '%s\n' "$REPOSITORY_PATHS" | sed -n '1p')
     ICLOUD_PROJECT_LINK="${PROJECT_ROOT}/remote/iCloud"
     REPO_LINK="${PROJECT_ROOT}/local/repo"
 
-    export PROJECT_NAME REPOSITORY_PATH ICLOUD_PROJECT_PATH ICLOUD_PROJECT_LINK REPO_LINK
+    export PROJECT_NAME REPOSITORY_PATH REPOSITORY_PATHS REPOSITORY_ENTRIES
+    export ICLOUD_PROJECT_PATH
+    export ICLOUD_PROJECT_LINK REPO_LINK
 }
 
 is_git_repository() {
@@ -81,6 +135,57 @@ relative_to_root() {
         "${PROJECT_ROOT}"/*) printf '%s\n' "${1#${PROJECT_ROOT}/}" ;;
         *) return 1 ;;
     esac
+}
+
+repository_link_name() {
+    repository_link_name_path=$1
+    basename -- "$repository_link_name_path"
+}
+
+repository_name_is_valid() {
+    case "$1" in
+        ''|.|..|*/*|*\"*|*\\*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+repository_name_for_path() {
+    repository_name_path=$1
+    while IFS="$(printf '\t')" read -r repository_entry_name repository_entry_path; do
+        [ "$repository_entry_path" = "$repository_name_path" ] || continue
+        printf '%s\n' "$repository_entry_name"
+        return 0
+    done <<EOF
+$REPOSITORY_ENTRIES
+EOF
+    repository_link_name "$repository_name_path"
+}
+
+repository_path_for_name() {
+    repository_path_name=$1
+    while IFS="$(printf '\t')" read -r repository_entry_name repository_entry_path; do
+        [ "$repository_entry_name" = "$repository_path_name" ] || continue
+        printf '%s\n' "$repository_entry_path"
+        return 0
+    done <<EOF
+$REPOSITORY_ENTRIES
+EOF
+    return 1
+}
+
+repository_path_is_configured() {
+    repository_path_to_check=$1
+    while IFS="$(printf '\t')" read -r repository_entry_name repository_entry_path; do
+        [ "$repository_entry_path" = "$repository_path_to_check" ] || continue
+        return 0
+    done <<EOF
+$REPOSITORY_ENTRIES
+EOF
+    return 1
+}
+
+repository_link_path() {
+    printf '%s/%s\n' "$REPO_LINK" "$(repository_name_for_path "$1")"
 }
 
 check_result() {

@@ -3,12 +3,14 @@
 
 project_name = Example Project
 
-# Optional until a repository is attached. The canonical repository must live
-# outside this wrapper, normally somewhere below the consumer's configured
-# repository_root.
-repository_path =
+# Optional until repositories are attached. The section name is also the
+# symlink name below local/repo/.
+#
+# [repository "product"]
+# path = /path/to/canonical/repository
 
 # This is resolved when the wrapper is created and is intentionally local.
 icloud_project_path = /path/to/consumer/iCloud/project
 
-# Orbit derives remote/iCloud and local/repo from the wrapper root.
+# Orbit derives remote/iCloud and local/repo/<repository-name> links from the
+# wrapper root.

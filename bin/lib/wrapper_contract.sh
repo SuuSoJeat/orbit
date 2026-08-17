@@ -33,30 +33,103 @@ wrapper_contract_repository_is_outside_icloud_project() {
     path_is_outside "$contract_repository_path" "${ICLOUD_PROJECT_PATH:-}"
 }
 
-wrapper_contract_repo_link_is_correct() {
-    [ -n "${REPOSITORY_PATH:-}" ] || return 1
-    [ -L "${REPO_LINK:-}" ] || return 1
-    [ "$(physical_dir "$REPO_LINK")" = "$(physical_dir "$REPOSITORY_PATH")" ]
+wrapper_contract_all_repositories_are_git_repos() {
+    [ -n "${REPOSITORY_PATHS:-}" ] || return 1
+    while IFS= read -r contract_repository_path; do
+        [ -n "$contract_repository_path" ] || continue
+        wrapper_contract_repository_is_git_repo "$contract_repository_path" || return 1
+    done <<EOF
+$REPOSITORY_PATHS
+EOF
 }
 
-wrapper_contract_validate_repository_link() {
-    if [ -e "$REPO_LINK" ] || [ -L "$REPO_LINK" ]; then
-        [ -L "$REPO_LINK" ] \
-            || die "refusing to replace non-symlink at ${REPO_LINK}"
-        [ -n "$REPOSITORY_PATH" ] \
-            || die "repository symlink exists but no repository is configured: ${REPO_LINK}"
-        link_target=$(physical_dir "$REPO_LINK") \
-            || die "repository symlink is broken: ${REPO_LINK}"
-        target_dir=$(physical_dir "$REPOSITORY_PATH") \
-            || die "configured repository target is not accessible: ${REPOSITORY_PATH}"
+wrapper_contract_all_repositories_are_outside_wrapper() {
+    [ -n "${REPOSITORY_PATHS:-}" ] || return 1
+    while IFS= read -r contract_repository_path; do
+        [ -n "$contract_repository_path" ] || continue
+        wrapper_contract_repository_is_outside_wrapper "$contract_repository_path" || return 1
+    done <<EOF
+$REPOSITORY_PATHS
+EOF
+}
+
+wrapper_contract_all_repositories_are_outside_icloud_project() {
+    [ -n "${REPOSITORY_PATHS:-}" ] || return 1
+    while IFS= read -r contract_repository_path; do
+        [ -n "$contract_repository_path" ] || continue
+        wrapper_contract_repository_is_outside_icloud_project "$contract_repository_path" || return 1
+    done <<EOF
+$REPOSITORY_PATHS
+EOF
+}
+
+wrapper_contract_all_repository_links_are_correct() {
+    [ -n "${REPOSITORY_PATHS:-}" ] || return 1
+    if [ -L "$REPO_LINK" ]; then
+        first_repository=$(printf '%s\n' "$REPOSITORY_PATHS" | sed -n '1p')
+        second_repository=$(printf '%s\n' "$REPOSITORY_PATHS" | sed -n '2p')
+        [ -n "$first_repository" ] && [ -z "$second_repository" ] || return 1
+        [ "$(physical_dir "$REPO_LINK")" = "$(physical_dir "$first_repository")" ]
+        return $?
+    fi
+    [ -d "$REPO_LINK" ] || return 1
+    while IFS= read -r contract_repository_path; do
+        [ -n "$contract_repository_path" ] || continue
+        contract_repository_link=$(repository_link_path "$contract_repository_path")
+        [ -L "$contract_repository_link" ] || return 1
+        [ "$(physical_dir "$contract_repository_link")" = "$(physical_dir "$contract_repository_path")" ] \
+            || return 1
+    done <<EOF
+$REPOSITORY_PATHS
+EOF
+}
+
+wrapper_contract_validate_repository_link_target() {
+    contract_link_path=$1
+    contract_repository_path=$2
+    if [ -e "$contract_link_path" ] || [ -L "$contract_link_path" ]; then
+        [ -L "$contract_link_path" ] \
+            || die "refusing to replace non-symlink at ${contract_link_path}"
+        link_target=$(physical_dir "$contract_link_path") \
+            || die "repository symlink is broken: ${contract_link_path}"
+        target_dir=$(physical_dir "$contract_repository_path") \
+            || die "configured repository target is not accessible: ${contract_repository_path}"
         [ "$link_target" = "$target_dir" ] \
             || die "repository symlink points to ${link_target}; refusing to replace it"
     fi
 }
 
+wrapper_contract_validate_repository_link() {
+    if [ -n "${REPOSITORY_PATHS:-}" ]; then
+        if [ -L "$REPO_LINK" ]; then
+            first_repository=$(printf '%s\n' "$REPOSITORY_PATHS" | sed -n '1p')
+            second_repository=$(printf '%s\n' "$REPOSITORY_PATHS" | sed -n '2p')
+            [ -n "$first_repository" ] && [ -z "$second_repository" ] \
+                || die "legacy repository symlink must be migrated before validation: ${REPO_LINK}"
+            wrapper_contract_validate_repository_link_target "$REPO_LINK" "$first_repository"
+            return 0
+        fi
+        if [ -e "$REPO_LINK" ]; then
+            [ -d "$REPO_LINK" ] \
+                || die "repository link boundary is not a directory: ${REPO_LINK}"
+        fi
+        while IFS= read -r contract_repository_path; do
+            [ -n "$contract_repository_path" ] || continue
+            contract_repository_link=$(repository_link_path "$contract_repository_path")
+            wrapper_contract_validate_repository_link_target \
+                "$contract_repository_link" "$contract_repository_path"
+        done <<EOF
+$REPOSITORY_PATHS
+EOF
+    elif [ -e "$REPO_LINK" ] || [ -L "$REPO_LINK" ]; then
+        [ -L "$REPO_LINK" ] \
+            || die "refusing to replace non-symlink at ${REPO_LINK}"
+        die "repository symlink exists but no repository is configured: ${REPO_LINK}"
+    fi
+}
+
 wrapper_contract_validate_initialization() {
     contract_wrapper_root=$1
-    contract_repository_path=${REPOSITORY_PATH:-}
 
     [ -d "$contract_wrapper_root" ] \
         || die "wrapper root is not a directory: ${contract_wrapper_root}"
@@ -89,27 +162,21 @@ wrapper_contract_validate_initialization() {
         target_dir=$(physical_dir "$ICLOUD_PROJECT_PATH") \
             || die "iCloud project target is not accessible: ${ICLOUD_PROJECT_PATH}"
         [ "$link_target" = "$target_dir" ] \
-            || die "iCloud project symlink points to ${link_target}, expected ${target_dir}"
+            || die "iCloud project symlink points to ${link_target}; refusing to replace it"
     fi
 
-    if [ -n "$contract_repository_path" ] && [ -e "$contract_repository_path" ]; then
-        wrapper_contract_repository_is_git_repo "$contract_repository_path" \
-            || die "repository is not an independent Git repository: ${contract_repository_path}"
+    if [ -n "${REPOSITORY_PATHS:-}" ]; then
+        while IFS= read -r contract_repository_path; do
+            [ -n "$contract_repository_path" ] || continue
+            if [ -e "$contract_repository_path" ]; then
+                wrapper_contract_repository_is_git_repo "$contract_repository_path" \
+                    || die "repository is not an independent Git repository: ${contract_repository_path}"
+            fi
+        done <<EOF
+$REPOSITORY_PATHS
+EOF
     fi
-    if [ -e "$REPO_LINK" ] || [ -L "$REPO_LINK" ]; then
-        [ -L "$REPO_LINK" ] \
-            || die "refusing to replace non-symlink at ${REPO_LINK}"
-        [ -n "$contract_repository_path" ] \
-            || die "repository symlink exists but no repository is configured: ${REPO_LINK}"
-        [ -d "$contract_repository_path" ] \
-            || die "repository target is missing: ${contract_repository_path}"
-        link_target=$(physical_dir "$REPO_LINK") \
-            || die "repository symlink is broken: ${REPO_LINK}"
-        target_dir=$(physical_dir "$contract_repository_path") \
-            || die "repository target is not accessible: ${contract_repository_path}"
-        [ "$link_target" = "$target_dir" ] \
-            || die "repository symlink points to ${link_target}, expected ${target_dir}"
-    fi
+    wrapper_contract_validate_repository_link
 }
 
 wrapper_contract_validate_attachment() {
@@ -138,7 +205,7 @@ wrapper_contract_validate_attachment() {
     target_dir=$(physical_dir "$ICLOUD_PROJECT_PATH") \
         || die "iCloud project target is not accessible: ${ICLOUD_PROJECT_PATH}"
     [ "$link_target" = "$target_dir" ] \
-        || die "iCloud project symlink points to ${link_target}, expected ${target_dir}"
+        || die "iCloud project symlink points to ${target_dir}; refusing to replace it"
     [ -d "$contract_repository_path" ] \
         || die "repository is not a directory: ${contract_repository_path}"
     wrapper_contract_repository_is_git_repo "$contract_repository_path" \
@@ -147,5 +214,4 @@ wrapper_contract_validate_attachment() {
         || die "repository must be outside the wrapper: ${contract_repository_path}"
     wrapper_contract_repository_is_outside_icloud_project "$contract_repository_path" \
         || die "repository must be outside the iCloud project: ${contract_repository_path}"
-    wrapper_contract_validate_repository_link
 }

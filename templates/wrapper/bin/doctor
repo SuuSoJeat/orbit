@@ -33,12 +33,16 @@ wrapper_is_git_repo() {
 }
 
 repository_is_git_repo() {
-    wrapper_contract_repository_is_git_repo
+    wrapper_contract_all_repositories_are_git_repos
 }
 
 repo_link_is_ignored() {
     RELATIVE_REPO_LINK=$(relative_to_root "$REPO_LINK") || return 1
     git -C "$PROJECT_ROOT" check-ignore -q -- "$RELATIVE_REPO_LINK"
+}
+
+repo_links_are_correct() {
+    wrapper_contract_all_repository_links_are_correct
 }
 
 icloud_project_is_directory() {
@@ -50,11 +54,11 @@ icloud_project_link_is_correct() {
 }
 
 repo_link_is_correct() {
-    wrapper_contract_repo_link_is_correct
+    wrapper_contract_all_repository_links_are_correct
 }
 
 repository_is_outside_wrapper() {
-    wrapper_contract_repository_is_outside_wrapper
+    wrapper_contract_all_repositories_are_outside_wrapper
 }
 
 icloud_project_has_no_git_metadata() {
@@ -66,7 +70,7 @@ icloud_project_has_no_dependencies() {
 }
 
 repository_is_outside_icloud_project() {
-    wrapper_contract_repository_is_outside_icloud_project
+    wrapper_contract_all_repositories_are_outside_icloud_project
 }
 
 printf 'Orbit project health check\n\n'
@@ -76,13 +80,13 @@ run_check "iCloud project link resolves correctly" icloud_project_link_is_correc
 run_check "iCloud project contains no .git directories" icloud_project_has_no_git_metadata
 run_check "iCloud project contains no node_modules directories" icloud_project_has_no_dependencies
 
-if [ -z "$REPOSITORY_PATH" ]; then
+if [ -z "$REPOSITORY_PATHS" ]; then
     printf 'INFO repository is not attached yet (optional)\n'
 else
     run_check "repository exists independently" repository_is_git_repo
     run_check "repository is outside wrapper" repository_is_outside_wrapper
     run_check "repository link is ignored by wrapper" repo_link_is_ignored
-    run_check "repository link resolves correctly" repo_link_is_correct
+    run_check "repository links resolve correctly" repo_links_are_correct
     run_check "repository is outside iCloud project" repository_is_outside_icloud_project
 fi
 

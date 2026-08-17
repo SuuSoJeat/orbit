@@ -54,7 +54,7 @@ assert_contains "iCloud:    ${ICLOUD_PROJECT_PATH}" "$OPEN_OUTPUT"
 if "$CLI_ROOT/bin/orbit" attach "$WRAPPER_ROOT" "${FIXTURE}/missing-repository" >/dev/null 2>&1; then
     fail "missing repository unexpectedly attached"
 fi
-assert_not_contains "repository_path = ${FIXTURE}/missing-repository" \
+assert_not_contains "${FIXTURE}/missing-repository" \
     "$(cat "$WRAPPER_ROOT/config/orbit.conf")"
 
 REPOSITORY_ROOT="${REPOSITORIES_ROOT}/Acme/product"
@@ -62,10 +62,46 @@ mkdir -p "$REPOSITORY_ROOT"
 git -C "$REPOSITORY_ROOT" init >/dev/null
 REPOSITORY_PHYSICAL=$(CDPATH= cd -P -- "$REPOSITORY_ROOT" && pwd -P)
 "$CLI_ROOT/bin/orbit" attach "$WRAPPER_ROOT" "$REPOSITORY_ROOT"
-[ -L "$WRAPPER_ROOT/local/repo" ]
-grep -F "repository_path = ${REPOSITORY_PHYSICAL}" "$WRAPPER_ROOT/config/orbit.conf" >/dev/null
+[ -d "$WRAPPER_ROOT/local/repo" ]
+[ -L "$WRAPPER_ROOT/local/repo/product" ]
+grep -F '[repository "product"]' "$WRAPPER_ROOT/config/orbit.conf" >/dev/null
+grep -F "path = ${REPOSITORY_PHYSICAL}" "$WRAPPER_ROOT/config/orbit.conf" >/dev/null
 "$CLI_ROOT/bin/orbit" doctor "$WRAPPER_ROOT"
-(cd "$WRAPPER_ROOT/PrivateNotes" && "$CLI_ROOT/bin/orbit" attach "$REPOSITORY_ROOT")
+SECOND_REPOSITORY_ROOT="${REPOSITORIES_ROOT}/Acme/design"
+mkdir -p "$SECOND_REPOSITORY_ROOT"
+git -C "$SECOND_REPOSITORY_ROOT" init >/dev/null
+(cd "$WRAPPER_ROOT/PrivateNotes" && "$CLI_ROOT/bin/orbit" attach \
+    "$REPOSITORY_ROOT" "$SECOND_REPOSITORY_ROOT")
+[ -L "$WRAPPER_ROOT/local/repo/product" ]
+[ -L "$WRAPPER_ROOT/local/repo/design" ]
+"$CLI_ROOT/bin/orbit" doctor "$WRAPPER_ROOT"
+NAMED_REPOSITORY_ROOT="${REPOSITORIES_ROOT}/Acme/design-assets"
+mkdir -p "$NAMED_REPOSITORY_ROOT"
+git -C "$NAMED_REPOSITORY_ROOT" init >/dev/null
+"$CLI_ROOT/bin/orbit" attach "$WRAPPER_ROOT" --name assets "$NAMED_REPOSITORY_ROOT"
+[ -L "$WRAPPER_ROOT/local/repo/assets" ]
+grep -F '[repository "assets"]' "$WRAPPER_ROOT/config/orbit.conf" >/dev/null
+
+LEGACY_ICLOUD="${FIXTURE}/legacy-icloud"
+LEGACY_WRAPPER="${FIXTURE}/legacy-wrapper"
+LEGACY_REPOSITORY_A="${FIXTURE}/legacy-repository-a"
+LEGACY_REPOSITORY_B="${FIXTURE}/legacy-repository-b"
+"$CLI_ROOT/bin/orbit" new "Legacy Wrapper Project" \
+    --icloud-root "$LEGACY_ICLOUD" \
+    --with-wrapper \
+    --wrapper-root "$LEGACY_WRAPPER"
+mkdir -p "$LEGACY_REPOSITORY_A" "$LEGACY_REPOSITORY_B"
+git -C "$LEGACY_REPOSITORY_A" init >/dev/null
+git -C "$LEGACY_REPOSITORY_B" init >/dev/null
+"$CLI_ROOT/bin/orbit" attach "$LEGACY_WRAPPER" "$LEGACY_REPOSITORY_A"
+/bin/rm -rf "$LEGACY_WRAPPER/local/repo"
+ln -s "$LEGACY_REPOSITORY_A" "$LEGACY_WRAPPER/local/repo"
+"$CLI_ROOT/bin/orbit" doctor "$LEGACY_WRAPPER"
+"$CLI_ROOT/bin/orbit" attach "$LEGACY_WRAPPER" "$LEGACY_REPOSITORY_B"
+[ -d "$LEGACY_WRAPPER/local/repo" ]
+[ -L "$LEGACY_WRAPPER/local/repo/legacy-repository-a" ]
+[ -L "$LEGACY_WRAPPER/local/repo/legacy-repository-b" ]
+"$CLI_ROOT/bin/orbit" doctor "$LEGACY_WRAPPER"
 
 CONFLICT_ICLOUD="${FIXTURE}/conflict-icloud"
 CONFLICT_WRAPPER="${FIXTURE}/conflict-wrapper"
@@ -81,7 +117,7 @@ touch "$CONFLICT_WRAPPER/remote/iCloud"
 if "$CLI_ROOT/bin/orbit" attach "$CONFLICT_WRAPPER" "$CONFLICT_REPOSITORY" >/dev/null 2>&1; then
     fail "attachment unexpectedly replaced a conflicting boundary file"
 fi
-assert_not_contains "repository_path = ${CONFLICT_REPOSITORY}" \
+assert_not_contains "${CONFLICT_REPOSITORY}" \
     "$(cat "$CONFLICT_WRAPPER/config/orbit.conf")"
 
 NESTED_ICLOUD="${FIXTURE}/nested-icloud"
@@ -96,9 +132,9 @@ git -C "$NESTED_REPOSITORY" init >/dev/null
 if "$CLI_ROOT/bin/orbit" attach "$NESTED_WRAPPER" "$NESTED_REPOSITORY" >/dev/null 2>&1; then
     fail "repository inside wrapper unexpectedly attached"
 fi
-assert_not_contains "repository_path = ${NESTED_REPOSITORY}" \
+assert_not_contains "${NESTED_REPOSITORY}" \
     "$(cat "$NESTED_WRAPPER/config/orbit.conf")"
-[ ! -L "$NESTED_WRAPPER/local/repo" ]
+[ ! -e "$NESTED_WRAPPER/local/repo" ]
 "$CLI_ROOT/bin/orbit" doctor "$NESTED_WRAPPER"
 
 INCOMPLETE_ICLOUD="${FIXTURE}/incomplete-icloud"
@@ -114,7 +150,7 @@ git -C "$INCOMPLETE_REPOSITORY" init >/dev/null
 if "$CLI_ROOT/bin/orbit" attach "$INCOMPLETE_WRAPPER" "$INCOMPLETE_REPOSITORY" >/dev/null 2>&1; then
     fail "incomplete wrapper unexpectedly attached"
 fi
-assert_not_contains "repository_path = ${INCOMPLETE_REPOSITORY}" \
+assert_not_contains "${INCOMPLETE_REPOSITORY}" \
     "$(cat "$INCOMPLETE_WRAPPER/config/orbit.conf")"
 [ ! -e "$INCOMPLETE_WRAPPER/local" ]
 
@@ -132,7 +168,7 @@ mkdir -p "$FAIL_BIN"
 cat > "$FAIL_BIN/ln" <<'EOF'
 #!/bin/sh
 case "$3" in
-    */local/repo) exit 1 ;;
+    */local/repo/*) exit 1 ;;
 esac
 exec /bin/ln "$@"
 EOF
@@ -141,10 +177,10 @@ if PATH="$FAIL_BIN:$PATH" "$CLI_ROOT/bin/orbit" attach \
     "$ROLLBACK_WRAPPER" "$ROLLBACK_REPOSITORY" >/dev/null 2>&1; then
     fail "injected attachment failure unexpectedly succeeded"
 fi
-assert_not_contains "repository_path = ${ROLLBACK_REPOSITORY}" \
+assert_not_contains "${ROLLBACK_REPOSITORY}" \
     "$(cat "$ROLLBACK_WRAPPER/config/orbit.conf")"
 [ -L "$ROLLBACK_WRAPPER/remote/iCloud" ]
-[ ! -L "$ROLLBACK_WRAPPER/local/repo" ]
+[ ! -e "$ROLLBACK_WRAPPER/local/repo" ]
 
 RECOVERY_ICLOUD="${FIXTURE}/recovery-icloud"
 RECOVERY_WRAPPER="${FIXTURE}/recovery-wrapper"
@@ -164,7 +200,7 @@ mkdir -p "$RECOVERY_BIN"
 cat > "$RECOVERY_BIN/ln" <<'EOF'
 #!/bin/sh
 case "$3" in
-    */local/repo) exit 1 ;;
+    */local/repo/*) exit 1 ;;
 esac
 exec /bin/ln "$@"
 EOF
@@ -182,9 +218,9 @@ if RECOVERY_OUTPUT=$(PATH="$RECOVERY_BIN:$PATH" "$CLI_ROOT/bin/orbit" attach \
     fail "attachment with failed rollback unexpectedly succeeded"
 fi
 assert_contains 'recovery backup preserved:' "$RECOVERY_OUTPUT"
-assert_contains "repository_path = ${RECOVERY_REPOSITORY_PHYSICAL}" \
+assert_contains "path = ${RECOVERY_REPOSITORY_PHYSICAL}" \
     "$(cat "$RECOVERY_WRAPPER/config/orbit.conf")"
-[ ! -L "$RECOVERY_WRAPPER/local/repo" ]
+[ ! -e "$RECOVERY_WRAPPER/local/repo" ]
 RECOVERY_BACKUP=$(find "$RECOVERY_WRAPPER/config" -maxdepth 1 \
     -type f -name 'orbit.conf.attach.*' -print)
 [ -n "$RECOVERY_BACKUP" ] || fail 'rollback backup was not preserved'

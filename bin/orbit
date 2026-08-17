@@ -34,7 +34,7 @@ Usage:
   orbit [--config PATH] config init|show|check
   orbit new [PROJECT_NAME] [options]
   orbit undo
-  orbit attach [WRAPPER_ROOT] REPOSITORY_PATH
+  orbit attach [WRAPPER_ROOT] [--name NAME] REPOSITORY_PATH...
   orbit doctor [WRAPPER_ROOT]
   orbit open [WRAPPER_ROOT] [--dry-run|--launch]
 
@@ -42,7 +42,7 @@ Commands:
   config    create or inspect the consumer configuration
   new       create an iCloud project and optionally its local wrapper
   undo      remove a previously recorded project creation
-  attach    attach a canonical local Git repository to a wrapper
+  attach    attach one or more canonical local Git repositories to a wrapper
   doctor    validate a wrapper's storage boundaries
   open      show or open a wrapper's project locations
 
@@ -57,6 +57,9 @@ Options for new:
 
 Global options:
   --config PATH  use an alternate consumer configuration file
+
+Attach options:
+  --name NAME    name one attached repository; defaults to its folder name
 EOF
 }
 

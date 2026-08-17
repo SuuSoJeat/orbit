@@ -5,7 +5,7 @@
 ### An iCloud-first project workspace for local Git repositories.
 
 Start with the human-facing project home. Add a local wrapper and
-attach the canonical repository only when you need them.
+attach canonical repositories only when you need them.
 
 [![CI](https://github.com/SuuSoJeat/orbit/actions/workflows/ci.yml/badge.svg)](https://github.com/SuuSoJeat/orbit/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/SuuSoJeat/orbit?label=latest)](https://github.com/SuuSoJeat/orbit/releases)
@@ -99,6 +99,24 @@ orbit attach \
   "$HOME/Repositories/Acme/product"
 ```
 
+Attach multiple repositories to the same wrapper:
+
+```sh
+orbit attach \
+  "$HOME/Repositories/Acme/product" \
+  "$HOME/Repositories/Acme/product-docs"
+```
+
+Repository names default to the folder name. Override one explicitly when
+needed:
+
+```sh
+orbit attach --name docs "$HOME/Repositories/Acme/product-docs"
+```
+
+Orbit records attachments as named sections and creates one symlink per
+repository below `local/repo/`.
+
 Check the boundaries and see the configured destinations:
 
 ```sh
@@ -121,7 +139,7 @@ orbit attach "$HOME/Repositories/Acme/product"
 | --- | --- |
 | orbit config init/show/check | Create or inspect consumer-specific locations |
 | `orbit new [PROJECT_NAME]` | Create an iCloud project and optionally a local wrapper |
-| `orbit attach REPOSITORY_PATH` | Attach a canonical local Git repository to the current wrapper |
+| `orbit attach REPOSITORY_PATH...` | Attach one or more canonical local Git repositories to the current wrapper |
 | `orbit doctor` | Validate the wrapper, iCloud project, and repository boundaries |
 | `orbit open --dry-run` | Print the project locations without opening applications |
 | `orbit open --launch` | Open the iCloud project, wrapper, and configured editor on macOS |
